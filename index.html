@@ -582,8 +582,9 @@ function SignaturePad({ onSave, onCancel }) {
 function EmployeesTab({ employees, setEmployees }) {
   const [form, setForm] = useState(null);
   const [sortDir, setSortDir] = useState(null); // null | "asc" | "desc"
+  const [showDeparted, setShowDeparted] = useState(false);
 
-  const startNew = () => setForm({ id: uid(), name: "", phone: "", position: "", hireDate: "", healthExpiry: "" });
+  const startNew = () => setForm({ id: uid(), name: "", phone: "", position: "", hireDate: "", healthExpiry: "", departureDate: "" });
 
   const save = () => {
     if (!form.name.trim()) return;
@@ -595,7 +596,10 @@ function EmployeesTab({ employees, setEmployees }) {
 
   const remove = (id) => setEmployees(employees.filter((e) => e.id !== id));
 
-  const displayed = [...employees];
+  const active = employees.filter((e) => !e.departureDate);
+  const departed = employees.filter((e) => e.departureDate);
+
+  const displayed = [...active];
   if (sortDir) {
     displayed.sort((a, b) => {
       if (!a.hireDate) return 1;
@@ -603,6 +607,30 @@ function EmployeesTab({ employees, setEmployees }) {
       return sortDir === "asc" ? a.hireDate.localeCompare(b.hireDate) : b.hireDate.localeCompare(a.hireDate);
     });
   }
+
+  const EmployeeCard = (e) => {
+    const dLeft = daysUntil(e.healthExpiry);
+    let badge = null;
+    if (e.healthExpiry && !e.departureDate) {
+      if (dLeft < 0) badge = <Stamp ok={false} textBad="ΛΗΓΜΕΝΟ ΒΙΒΛΙΑΡΙΟ" />;
+      else if (dLeft <= HEALTH_WARN_DAYS) badge = <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-amber-500 text-amber-600">Λήγει σε {dLeft} ημ.</span>;
+      else badge = <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-teal-600 text-teal-700">Βιβλιάριο εντάξει</span>;
+    }
+    return (
+      <Card key={e.id} className="flex items-center justify-between">
+        <div>
+          <p className="font-semibold text-slate-800">{e.name}</p>
+          <p className="text-xs text-slate-500">{e.position || "—"} · {e.phone || "χωρίς τηλέφωνο"}</p>
+          {e.departureDate && <p className="text-[10px] text-slate-400 mt-0.5">Αποχώρησε: {e.departureDate}</p>}
+          <div className="mt-1">{badge}</div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={() => setForm(e)} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg">Επεξεργασία</button>
+          <button onClick={() => remove(e.id)} className="text-xs px-2 py-1.5 border border-red-200 text-red-600 rounded-lg"><Trash2 size={14} /></button>
+        </div>
+      </Card>
+    );
+  };
 
   return (
     <div>
@@ -645,6 +673,9 @@ function EmployeesTab({ employees, setEmployees }) {
           <Field label="Λήξη βιβλιαρίου υγείας">
             <input type="date" className={inputCls} value={form.healthExpiry} onChange={(e) => setForm({ ...form, healthExpiry: e.target.value })} />
           </Field>
+          <Field label="Ημερομηνία αποχώρησης (προαιρετικό)">
+            <input type="date" className={inputCls} value={form.departureDate || ""} onChange={(e) => setForm({ ...form, departureDate: e.target.value })} />
+          </Field>
           <div className="flex gap-2">
             <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-1">
               <Save size={14} /> Αποθήκευση
@@ -655,30 +686,18 @@ function EmployeesTab({ employees, setEmployees }) {
       )}
 
       <div className="space-y-2">
-        {employees.length === 0 && <p className="text-sm text-slate-400">Δεν έχουν καταχωρηθεί εργαζόμενοι ακόμα.</p>}
-        {displayed.map((e) => {
-          const dLeft = daysUntil(e.healthExpiry);
-          let badge = null;
-          if (e.healthExpiry) {
-            if (dLeft < 0) badge = <Stamp ok={false} textBad="ΛΗΓΜΕΝΟ ΒΙΒΛΙΑΡΙΟ" />;
-            else if (dLeft <= HEALTH_WARN_DAYS) badge = <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-amber-500 text-amber-600">Λήγει σε {dLeft} ημ.</span>;
-            else badge = <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-teal-600 text-teal-700">Βιβλιάριο εντάξει</span>;
-          }
-          return (
-            <Card key={e.id} className="flex items-center justify-between">
-              <div>
-                <p className="font-semibold text-slate-800">{e.name}</p>
-                <p className="text-xs text-slate-500">{e.position || "—"} · {e.phone || "χωρίς τηλέφωνο"}</p>
-                <div className="mt-1">{badge}</div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => setForm(e)} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg">Επεξεργασία</button>
-                <button onClick={() => remove(e.id)} className="text-xs px-2 py-1.5 border border-red-200 text-red-600 rounded-lg"><Trash2 size={14} /></button>
-              </div>
-            </Card>
-          );
-        })}
+        {active.length === 0 && <p className="text-sm text-slate-400">Δεν έχουν καταχωρηθεί εργαζόμενοι ακόμα.</p>}
+        {displayed.map(EmployeeCard)}
       </div>
+
+      {departed.length > 0 && (
+        <div className="mt-6 pt-4 border-t border-slate-200">
+          <button onClick={() => setShowDeparted((v) => !v)} className="text-xs font-semibold text-slate-500 underline mb-2">
+            {showDeparted ? "Απόκρυψη" : "Εμφάνιση"} Αποχωρησάντων ({departed.length})
+          </button>
+          {showDeparted && <div className="space-y-2 opacity-75">{departed.map(EmployeeCard)}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -1219,6 +1238,68 @@ function NewCleanItemForm({ onAdd }) {
   );
 }
 
+const isoToDate = (iso) => { const [y, m, d] = iso.split("-").map(Number); return new Date(y, m - 1, d); };
+
+function daysSinceLastCleanMark(key, cleanData) {
+  let lastISO = null;
+  Object.values(cleanData || {}).forEach((days) => {
+    Object.entries(days || {}).forEach(([dateISO, shifts]) => {
+      const marked = SHIFTS.some((s) => shifts?.[s]?.[key]);
+      if (marked && (!lastISO || dateISO > lastISO)) lastISO = dateISO;
+    });
+  });
+  if (!lastISO) return null;
+  return Math.floor((isoToDate(todayISO()) - isoToDate(lastISO)) / 86400000);
+}
+
+function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
+  const [y, m] = month.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const dayCols = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const rows = [];
+  cleaningAreas.forEach((group) => {
+    group.items.forEach((item) => rows.push({ key: `${group.id}__${item.id}`, name: item.name, area: group.area }));
+  });
+
+  return (
+    <Card className="overflow-x-auto">
+      <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mb-2">Μηνιαίος Πίνακας Καθαριότητας — {month}</p>
+      <table className="border-collapse text-[10px]">
+        <thead>
+          <tr>
+            <th className="sticky left-0 bg-white border border-slate-200 px-2 py-1 text-left">Σημείο</th>
+            {dayCols.map((d) => <th key={d} className="border border-slate-200 px-1 py-1 w-6 text-center">{d}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => {
+            const overdue = (daysSinceLastCleanMark(r.key, cleanData) ?? 9999) >= 25;
+            return (
+              <tr key={r.key}>
+                <td className={`sticky left-0 border border-slate-200 px-2 py-1 whitespace-nowrap font-medium ${overdue ? "bg-red-100 text-red-700" : "bg-white text-slate-700"}`}>
+                  {r.name}
+                </td>
+                {dayCols.map((d) => {
+                  const dateISO = `${month}-${String(d).padStart(2, "0")}`;
+                  const done = SHIFTS.some((s) => cleanData?.[month]?.[dateISO]?.[s]?.[r.key]);
+                  return (
+                    <td key={d} className={`border border-slate-200 w-6 h-6 text-center ${done ? "bg-teal-500" : ""}`}></td>
+                  );
+                })}
+              </tr>
+            );
+          })}
+          {rows.length === 0 && (
+            <tr><td className="px-2 py-2 text-slate-400" colSpan={daysInMonth + 1}>Δεν υπάρχουν σημεία καθαριότητας.</td></tr>
+          )}
+        </tbody>
+      </table>
+      <p className="text-[10px] text-slate-400 mt-2">Πράσινο = έγινε καθαριότητα εκείνη τη μέρα. Κόκκινο όνομα = πάνω από 25 μέρες χωρίς καμία καταχώρηση.</p>
+    </Card>
+  );
+}
+
 function NewCleanAreaForm({ onAdd }) {
   const [name, setName] = useState("");
   return (
@@ -1311,6 +1392,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   const addDisplayItem = () => setDisplayItems([...displayItems, { id: uid(), name: "Νέα βιτρίνα", limit: 7, cmp: "lt" }]);
 
   const [editingClean, setEditingClean] = useState(false);
+  const [showCleanGrid, setShowCleanGrid] = useState(false);
   const [expandedClean, setExpandedClean] = useState({});
   const moveCleanArea = (idx, dir) => {
     const next = [...cleaningAreas];
@@ -1730,11 +1812,16 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
       {sub === "clean" && (
         <div className="space-y-3">
-          <div className="flex justify-end">
+          <div className="flex justify-between items-center">
+            <button onClick={() => setShowCleanGrid((v) => !v)} className="text-[11px] text-teal-700 underline">
+              {showCleanGrid ? "Απόκρυψη μηνιαίου πίνακα" : "Μηνιαίος πίνακας καθαριότητας"}
+            </button>
             <button onClick={() => setEditingClean((v) => !v)} className="text-[11px] text-slate-400 underline">
               {editingClean ? "Τέλος επεξεργασίας" : "Επεξεργασία λίστας καθαριότητας"}
             </button>
           </div>
+
+          {showCleanGrid && <MonthlyCleaningGrid cleaningAreas={cleaningAreas} cleanData={cleanData} month={exportMonth} />}
 
           {!editingClean && cleaningAreas.map((group) => {
             const visibleItems = group.items.filter((item) => shouldShowCleanItem(item, cleanData, group.id, date));
@@ -2176,6 +2263,71 @@ const TECHNICIAN_ACTIONS = [
   "Χρειάζεται παρακολούθηση / επανέλεγχος",
 ];
 
+function AdminCodePanel({ code, setCode }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(code);
+  const save = () => {
+    if (!draft.trim()) return;
+    setCode(draft.trim());
+    setEditing(false);
+  };
+  return (
+    <Card className="mb-4">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
+        <ShieldCheck size={14} /> Κωδικός Διαχειριστή
+      </p>
+      <p className="text-xs text-slate-500 mb-2">
+        Ζητείται για να μπεις στις καρτέλες «Προσωπικό» και «Εκπαίδευση» — ώστε μόνο εσύ να τις βλέπεις.
+      </p>
+      {!editing ? (
+        <button onClick={() => { setDraft(code); setEditing(true); }} className="text-[11px] text-teal-700 underline">
+          Αλλαγή κωδικού
+        </button>
+      ) : (
+        <div className="flex items-center gap-2">
+          <input className={inputCls + " max-w-[140px]"} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <button onClick={save} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold">Αποθήκευση</button>
+          <button onClick={() => setEditing(false)} className="border border-slate-300 px-3 py-2 rounded-lg text-xs">Άκυρο</button>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function AdminGate({ code, unlocked, setUnlocked, children }) {
+  const [input, setInput] = useState("");
+  const [error, setError] = useState(false);
+
+  if (unlocked) return children;
+
+  const tryUnlock = (e) => {
+    e.preventDefault();
+    if (input === code) { setUnlocked(true); setError(false); }
+    else setError(true);
+  };
+
+  return (
+    <Card>
+      <p className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-1.5">
+        <ShieldCheck size={16} /> Κλειδωμένη ενότητα
+      </p>
+      <p className="text-xs text-slate-500 mb-3">Αυτή η καρτέλα είναι ορατή μόνο στον διαχειριστή.</p>
+      <form onSubmit={tryUnlock} className="flex items-center gap-2">
+        <input
+          type="password"
+          autoFocus
+          value={input}
+          onChange={(e) => { setInput(e.target.value); setError(false); }}
+          className={`${inputCls} max-w-[160px]`}
+          placeholder="Κωδικός διαχειριστή"
+        />
+        <button type="submit" className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Είσοδος</button>
+      </form>
+      {error && <p className="text-xs text-red-600 mt-2">Λάθος κωδικός.</p>}
+    </Card>
+  );
+}
+
 function TechnicianVisitsPanel({ visits, setVisits }) {
   const [form, setForm] = useState(null);
   const startNew = () => setForm({
@@ -2195,6 +2347,32 @@ function TechnicianVisitsPanel({ visits, setVisits }) {
       doneOptions: f.doneOptions.includes(opt) ? f.doneOptions.filter((x) => x !== opt) : [...f.doneOptions, opt],
     }));
   };
+
+  const [showAllVisits, setShowAllVisits] = useState(false);
+  const sortedVisits = [...visits].sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")));
+  const visibleVisits = showAllVisits ? sortedVisits : sortedVisits.slice(0, 1);
+
+  const VisitCard = (v) => (
+    <div key={v.id} className="border border-slate-100 rounded-lg p-2.5 flex items-start justify-between gap-2">
+      <div>
+        <p className="text-sm font-semibold text-slate-800">{v.equipment}</p>
+        <p className="text-xs text-slate-500">{v.date}{v.time && ` · ${v.time}`} · {v.technician || "—"}</p>
+        {v.found && <p className="text-xs text-slate-500 mt-0.5">Βρήκε: {v.found}</p>}
+        {(v.doneOptions?.length > 0 || v.doneNote) && (
+          <p className="text-xs text-slate-500">Έκανε: {[...(v.doneOptions || []), v.doneNote].filter(Boolean).join(" · ")}</p>
+        )}
+        {(v.cost || v.nextVisit) && (
+          <p className="text-xs text-slate-400 mt-0.5">
+            {v.cost && `Κόστος: ${v.cost}€`}{v.cost && v.nextVisit && " · "}{v.nextVisit && `Επόμενη: ${v.nextVisit}`}
+          </p>
+        )}
+      </div>
+      <div className="flex gap-1 shrink-0">
+        <button onClick={() => setForm({ time: "", doneOptions: [], doneNote: v.done || "", cost: "", nextVisit: "", ...v })} className="text-xs px-2 py-1 border border-slate-300 rounded-lg">Επεξ.</button>
+        <button onClick={() => remove(v.id)} className="text-xs px-2 py-1 border border-red-200 text-red-600 rounded-lg"><Trash2 size={12} /></button>
+      </div>
+    </div>
+  );
 
   return (
     <Card className="mb-4">
@@ -2263,28 +2441,75 @@ function TechnicianVisitsPanel({ visits, setVisits }) {
       )}
 
       <div className="space-y-2">
-        {visits.map((v) => (
-          <div key={v.id} className="border border-slate-100 rounded-lg p-2.5 flex items-start justify-between gap-2">
-            <div>
-              <p className="text-sm font-semibold text-slate-800">{v.equipment}</p>
-              <p className="text-xs text-slate-500">{v.date}{v.time && ` · ${v.time}`} · {v.technician || "—"}</p>
-              {v.found && <p className="text-xs text-slate-500 mt-0.5">Βρήκε: {v.found}</p>}
-              {(v.doneOptions?.length > 0 || v.doneNote) && (
-                <p className="text-xs text-slate-500">Έκανε: {[...(v.doneOptions || []), v.doneNote].filter(Boolean).join(" · ")}</p>
-              )}
-              {(v.cost || v.nextVisit) && (
-                <p className="text-xs text-slate-400 mt-0.5">
-                  {v.cost && `Κόστος: ${v.cost}€`}{v.cost && v.nextVisit && " · "}{v.nextVisit && `Επόμενη: ${v.nextVisit}`}
-                </p>
-              )}
-            </div>
-            <div className="flex gap-1 shrink-0">
-              <button onClick={() => setForm({ time: "", doneOptions: [], doneNote: v.done || "", cost: "", nextVisit: "", ...v })} className="text-xs px-2 py-1 border border-slate-300 rounded-lg">Επεξ.</button>
-              <button onClick={() => remove(v.id)} className="text-xs px-2 py-1 border border-red-200 text-red-600 rounded-lg"><Trash2 size={12} /></button>
-            </div>
-          </div>
-        ))}
+        {visibleVisits.map(VisitCard)}
+        {sortedVisits.length > 1 && (
+          <button onClick={() => setShowAllVisits((v) => !v)} className="text-[11px] text-teal-700 underline">
+            {showAllVisits ? "Απόκρυψη παλαιότερων" : `Δες ${sortedVisits.length - 1} ακόμα`}
+          </button>
+        )}
       </div>
+    </Card>
+  );
+}
+
+function SafetyTechnicianPanel({ info, setInfo }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(info);
+  const save = () => { setInfo(draft); setEditing(false); };
+  const dLeft = daysUntil(info.contractEnd);
+
+  return (
+    <Card className="mb-4">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
+        <ShieldCheck size={14} /> Τεχνικός Ασφαλείας
+      </p>
+      <p className="text-xs text-slate-500 mb-3">
+        Βάσει Ν. 3850/2010 (άρθρο 18), η υποχρέωση απασχόλησης Ιατρού Εργασίας ισχύει για επιχειρήσεις με 50+ εργαζομένους — δεν αφορά επιχειρήσεις του μεγέθους σας.
+      </p>
+
+      {!editing ? (
+        <>
+          {info.name ? (
+            <div className="text-sm space-y-0.5 mb-2">
+              <p><b>{info.name}</b> {info.company && `· ${info.company}`}</p>
+              <p className="text-xs text-slate-500">Σύμβαση: {info.contractStart || "—"} έως {info.contractEnd || "—"}</p>
+              {info.contractEnd && (
+                dLeft < 0
+                  ? <Stamp ok={false} textBad="ΛΗΓΜΕΝΗ ΣΥΜΒΑΣΗ" />
+                  : dLeft <= HEALTH_WARN_DAYS
+                    ? <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-amber-500 text-amber-600">Λήγει σε {dLeft} ημ.</span>
+                    : <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-teal-600 text-teal-700">Σύμβαση εντάξει</span>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-slate-400 mb-2">Δεν έχουν καταχωρηθεί στοιχεία ακόμα.</p>
+          )}
+          <button onClick={() => { setDraft(info); setEditing(true); }} className="text-[11px] text-teal-700 underline">
+            Επεξεργασία στοιχείων
+          </button>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <Field label="Εταιρεία / πάροχος">
+            <input className={inputCls} value={draft.company || ""} onChange={(e) => setDraft({ ...draft, company: e.target.value })} />
+          </Field>
+          <Field label="Ονοματεπώνυμο τεχνικού ασφαλείας">
+            <input className={inputCls} value={draft.name || ""} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ημ. έναρξης σύμβασης">
+              <input type="date" className={inputCls} value={draft.contractStart || ""} onChange={(e) => setDraft({ ...draft, contractStart: e.target.value })} />
+            </Field>
+            <Field label="Ημ. λήξης σύμβασης">
+              <input type="date" className={inputCls} value={draft.contractEnd || ""} onChange={(e) => setDraft({ ...draft, contractEnd: e.target.value })} />
+            </Field>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
+            <button onClick={() => setEditing(false)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
@@ -2361,7 +2586,7 @@ function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, o
   );
 }
 
-function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits }) {
+function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, safetyTechnician, setSafetyTechnician }) {
   const [form, setForm] = useState(null);
 
   const startNew = () => setForm({ id: uid(), code: "", from: "", to: "", destroyDate: "", notes: "", responsible: "" });
@@ -2381,9 +2606,13 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
 
       <BusinessInfoPanel info={businessInfo} setInfo={setBusinessInfo} />
 
+      <AdminCodePanel code={adminCode} setCode={setAdminCode} />
+
       <BackupPanel getBackupText={getBackupText} onImport={onImport} />
 
       <TechnicianVisitsPanel visits={technicianVisits} setVisits={setTechnicianVisits} />
+
+      <SafetyTechnicianPanel info={safetyTechnician} setInfo={setSafetyTechnician} />
 
       <MonthlyRetentionPanel
         ccpData={ccpData} setCcpData={setCcpData}
@@ -2522,6 +2751,9 @@ function App() {
   const [records, setRecords] = useStore("archive-records", []);
   const [businessInfo, setBusinessInfo] = useStore("business-info", DEFAULT_BUSINESS_INFO);
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
+  const [adminCode, setAdminCode] = useStore("admin-code", "1234");
+  const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
+  const [adminUnlocked, setAdminUnlocked] = useState(false); // μόνο για τη διάρκεια της συνεδρίας, όχι μόνιμο
 
   const [tab, setTab] = useState("daily");
   const [printContent, setPrintContent] = useState(null);
@@ -2556,7 +2788,7 @@ function App() {
 
   const expiringSoon = employees.filter((e) => {
     const d = daysUntil(e.healthExpiry);
-    return e.healthExpiry && d <= HEALTH_WARN_DAYS;
+    return !e.departureDate && e.healthExpiry && d <= HEALTH_WARN_DAYS;
   });
 
   const tabs = [
@@ -2599,8 +2831,16 @@ function App() {
       </nav>
 
       <main className="max-w-2xl mx-auto p-4 pb-16 no-print">
-        {tab === "employees" && <EmployeesTab employees={employees} setEmployees={setEmployees} />}
-        {tab === "training" && <TrainingTab employees={employees} sessions={sessions} setSessions={setSessions} requestPrint={requestPrint} packageCompletions={packageCompletions} setPackageCompletions={setPackageCompletions} businessInfo={businessInfo} />}
+        {tab === "employees" && (
+          <AdminGate code={adminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+            <EmployeesTab employees={employees} setEmployees={setEmployees} />
+          </AdminGate>
+        )}
+        {tab === "training" && (
+          <AdminGate code={adminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+            <TrainingTab employees={employees} sessions={sessions} setSessions={setSessions} requestPrint={requestPrint} packageCompletions={packageCompletions} setPackageCompletions={setPackageCompletions} businessInfo={businessInfo} />
+          </AdminGate>
+        )}
         {tab === "daily" && (
           <DailyLogsTab
             ccpData={ccpData} setCcpData={setCcpData}
@@ -2625,6 +2865,8 @@ function App() {
             oilData={oilData} setOilData={setOilData}
             businessInfo={businessInfo} setBusinessInfo={setBusinessInfo}
             technicianVisits={technicianVisits} setTechnicianVisits={setTechnicianVisits}
+            adminCode={adminCode} setAdminCode={setAdminCode}
+            safetyTechnician={safetyTechnician} setSafetyTechnician={setSafetyTechnician}
           />
         )}
       </main>
