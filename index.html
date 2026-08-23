@@ -1,0 +1,2699 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no" />
+<title>Brewtopia · Διαχείριση Ποιότητας</title>
+<link rel="icon" href="data:,">
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  @media print {
+    body * { visibility: hidden; }
+    #print-root, #print-root * { visibility: visible; }
+    #print-root { position: absolute; top: 0; left: 0; width: 100%; padding: 16px; }
+    .no-print { display: none !important; }
+  }
+</style>
+</head>
+<body>
+<div id="root">
+  <div style="padding:32px;text-align:center;color:#64748b;font-size:14px;">Φόρτωση εφαρμογής…</div>
+</div>
+<script>
+  window.addEventListener("error", function (e) {
+    var root = document.getElementById("root");
+    if (root && root.innerHTML.indexOf("Φόρτωση") !== -1) {
+      root.innerHTML = '<div style="padding:24px;color:#b91c1c;font-family:sans-serif;font-size:13px;white-space:pre-wrap;">Σφάλμα φόρτωσης: ' + (e.message || e) + '</div>';
+    }
+  });
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useRef, useCallback } = React;
+
+/* ============================================================
+   ΑΠΛΑ SVG ΕΙΚΟΝΙΔΙΑ — χωρίς εξωτερική εξάρτηση (αξιοπιστία > ακρίβεια)
+   ============================================================ */
+function makeIcon(paths) {
+  return function Icon({ size = 20, className = "", ...rest }) {
+    return (
+      <svg
+        width={size} height={size} viewBox="0 0 24 24"
+        fill="none" stroke="currentColor" strokeWidth="2"
+        strokeLinecap="round" strokeLinejoin="round"
+        className={className} {...rest}
+      >
+        {paths}
+      </svg>
+    );
+  };
+}
+
+const Plus = makeIcon(<><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></>);
+const Check = makeIcon(<polyline points="20 6 9 17 4 12" />);
+const ChevronRight = makeIcon(<polyline points="9 18 15 12 9 6" />);
+const ArrowDown = makeIcon(<><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></>);
+const Trash2 = makeIcon(<>
+  <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+  <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+  <line x1="10" y1="11" x2="10" y2="17" /><line x1="14" y1="11" x2="14" y2="17" />
+</>);
+const Save = makeIcon(<>
+  <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+  <polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" />
+</>);
+const RotateCcw = makeIcon(<><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><polyline points="3 3 3 8 8 8" /></>);
+const Clock = makeIcon(<><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></>);
+const Calendar = makeIcon(<>
+  <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" />
+  <line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+</>);
+const AlertTriangle = makeIcon(<>
+  <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+  <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+</>);
+const Users = makeIcon(<>
+  <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" />
+  <path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" />
+</>);
+const GraduationCap = makeIcon(<>
+  <path d="M22 10 12 5 2 10l10 5 10-5Z" /><path d="M6 12v5c0 1.66 2.69 3 6 3s6-1.34 6-3v-5" />
+</>);
+const Archive = makeIcon(<>
+  <rect x="2" y="3" width="20" height="5" rx="1" /><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+  <line x1="10" y1="12" x2="14" y2="12" />
+</>);
+const GitBranch = makeIcon(<>
+  <line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" />
+  <path d="M18 9a9 9 0 0 1-9 9" />
+</>);
+const ClipboardList = makeIcon(<>
+  <path d="M9 2h6a1 1 0 0 1 1 1v2H8V3a1 1 0 0 1 1-1Z" /><rect x="4" y="4" width="16" height="18" rx="2" />
+  <line x1="8" y1="11" x2="16" y2="11" /><line x1="8" y1="15" x2="16" y2="15" />
+</>);
+const Sparkles = makeIcon(<path d="M12 3l1.6 4.9L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.1Z" />);
+const Thermometer = makeIcon(<path d="M14 4v10.5a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z" />);
+const Snowflake = makeIcon(<>
+  <line x1="12" y1="2" x2="12" y2="22" /><line x1="4" y1="7" x2="20" y2="17" /><line x1="20" y1="7" x2="4" y2="17" />
+</>);
+const Droplet = makeIcon(<path d="M12 2s7 8.5 7 13a7 7 0 1 1-14 0c0-4.5 7-13 7-13Z" />);
+const Flame = makeIcon(<path d="M12 2c1 4-3 5-3 9a3 3 0 0 0 6 0c0-1-1-2-1-3 2 1 3 3 3 5a5 5 0 0 1-10 0c0-5 3-7 5-11Z" />);
+const ShieldCheck = makeIcon(<><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3Z" /><polyline points="9 12 11 14 15 10" /></>);
+const FileSignature = makeIcon(<>
+  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h6" /><polyline points="14 2 14 8 20 8" />
+  <path d="M13 19c1.5-2 3.5-2 5 0" />
+</>);
+
+/* ============================================================
+   ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
+   ============================================================ */
+
+const SHIFTS = ["Α", "Β", "Γ"];
+
+const DEFAULT_FRIDGE_STATIONS = [
+  { id: "kat2", name: "Κατάψυξη 2 (θάλαμος)", type: "freezer" },
+  { id: "psy1", name: "Ψυγείο 1 (coca κουζίνα)", type: "fridge" },
+  { id: "psy3", name: "Ψυγείο 3 (κουζίνα coca)", type: "fridge" },
+  { id: "psy5", name: "Ψυγείο 5 (απόψυξη)", type: "fridge" },
+  { id: "psy6", name: "Ψυγείο 6 (Life κουζίνα)", type: "fridge" },
+  { id: "apo7", name: "Ψυγείο Πατάτας", type: "fridge" },
+  { id: "psy9", name: "Ψυγείο 9 (τοστ - κρύα αποθήκη)", type: "fridge" },
+  { id: "psy10", name: "Ψυγείο 10 (βιτρίνες τοστ κρύα)", type: "fridge" },
+  { id: "psy11", name: "Ψυγείο 11 (βιτρίνα σαλάτας)", type: "fridge" },
+  { id: "psy12", name: "Ψυγείο 12 (καφέ)", type: "fridge" },
+];
+
+const DEFAULT_DISPLAY_ITEMS = [
+  { id: "vcream", name: "Κάδος κρέμα", limit: 7, cmp: "lt", unit: "°C" },
+  { id: "vchoc", name: "Κάδος σοκολάτα", limit: 7, cmp: "lt", unit: "°C" },
+];
+
+const DEFAULT_CLEANING_AREAS = [
+  { area: "Αποθήκες α' υλών", items: [
+    ["Κατάψυξη 2 (θάλαμος)", "κάθε βάρδια"], ["Ψυγείο 1 (coca κουζίνα)", "κάθε βάρδια"],
+    ["Ψυγείο 3 (κουζίνα coca)", "κάθε βάρδια"], ["Ψυγείο 5 (απόψυξη)", "κάθε βάρδια"],
+    ["Ψυγείο 6 (Life κουζίνα)", "κάθε βάρδια"], ["Αποθήκη 7 (πατάτας)", "κάθε βάρδια"],
+    ["Ψυγείο 9 (τοστ-κρύα αποθήκη)", "κάθε βάρδια"], ["Ψυγείο 10 (βιτρίνες τοστ κρύα)", "κάθε βάρδια"],
+    ["Ψυγείο 11 (σαλάτας)", "κάθε βάρδια"], ["Ψυγείο 12 (καφέ)", "κάθε βάρδια"],
+    ["Αποθήκη ξηρού φορτίου", "κάθε βάρδια"],
+  ]},
+  { area: "Τουαλέτες", items: [["Τουαλέτες Ανδρών", "συνεχώς"], ["Τουαλέτες Γυναικών", "συνεχώς"]] },
+  { area: "Τραπεζαρία", items: [["Δάπεδα", "συνεχώς"], ["Τραπέζια", "συνεχώς"], ["Τζάμια", "κάθε βάρδια"]] },
+  { area: "Προετοιμασία", items: [
+    ["Δάπεδα", "κάθε βάρδια"], ["Τοίχοι", "κάθε βάρδια"], ["Λάντζα", "κάθε βάρδια"],
+    ["Κυκλοθερμικός φούρνος", "Παρασκευή βράδυ"], ["Ραφιέρες κρυώματος", "Παρασκευή βράδυ"],
+    ["Κάδοι απορριμμάτων", "κάθε βάρδια"], ["Πάγκος προετοιμασίας", "συνεχώς"],
+    ["Λαμαρίνες", "Σάββατο πρωί"], ["Περσίδες εξαερισμού", "1 Δευ/μήνα"],
+  ]},
+  { area: "Μπουφές", items: [
+    ["Δάπεδο μπουφέ", "κάθε βάρδια"], ["Σκεύη", "συνεχώς"], ["Εργαλεία", "συνεχώς"],
+    ["Πόστο κρύων", "κάθε βάρδια"], ["Πόστο σαλάτας", "Σάβ/το βράδυ"],
+    ["Πόστο σφολιατικών", "Σάβ/το βράδυ"], ["Πόστο καφέ", "Σάβ/το βράδυ"],
+    ["Φριτέζα", "Τρι-Πεμ-Κυρ"], ["Μηχανή καφέ", "Σάβ/το βράδυ"],
+    ["Μηχανή καφέ φίλτρου", "Σάβ/το βράδυ"], ["Πόστο τοστ", "Σάβ/το βράδυ"],
+    ["Γρανιτομηχανή", "Δευ-Τετ-Παρ-Κυρ"], ["Fredoccino", "Δευ-Τετ-Παρ-Κυρ"],
+    ["Τοστιέρες", "Πέμπτη μεσημέρι"], ["Γαστρονόμοι", "Πέμπτη μεσημέρι"],
+    ["Τζάμια βιτρινών", "Παρασκευή βράδυ"], ["Box πάγου", "κάθε βάρδια"],
+    ["Συρτάρι πάγου", "Παρασκευή βράδυ"], ["Σαλαμάνδρα", "Παρασκευή βράδυ"],
+    ["Φρυγανιέρα", "Παρασκευή βράδυ"], ["Παγομηχανή", "—"], ["Παγωτομηχανή soft", "Δευ-Τετ-Παρ-Κυρ"],
+  ]},
+  { area: "Προσωπική Υγιεινή", items: [
+    ["Στολή", "κάθε βάρδια"], ["Γάντια", "κάθε βάρδια"], ["Χέρια", "κάθε βάρδια"],
+    ["Κοσμήματα", "κάθε βάρδια"], ["Μαλλιά και καπέλο", "κάθε βάρδια"],
+    ["Κουτί μεταφοράς delivery", "κάθε βάρδια"], ["Σάκοι μεταφοράς", "κάθε βάρδια"],
+  ]},
+];
+
+const TRAINING_PACKAGES = [
+  {
+    id: "basic",
+    title: "Βασική / Αρχική Εκπαίδευση",
+    note: "Υποχρεωτικό για κάθε νέο εργαζόμενο πριν ξεκινήσει.",
+    topics: [
+      "Ατομική υγιεινή (στολή, χέρια, κοσμήματα, μαλλιά, γάντια)",
+      "Καθαριότητα χώρου εργασίας",
+      "Βασικές αρχές υγιεινής & ασφάλειας τροφίμων (HACCP)",
+      "Διάγραμμα ροής & κρίσιμα σημεία ελέγχου (τι είναι, γιατί καταγράφουμε)",
+      "Πυρασφάλεια — βασικά",
+      "Πρώτες βοήθειες — βασικά",
+    ],
+  },
+  {
+    id: "cold",
+    title: "Κρύα Κουζίνα (Σαλάτες / Σάντουιτς / Κρύα Τοστ)",
+    note: "Για θέση παρασκευής κρύων προϊόντων.",
+    topics: [
+      "Διαχωρισμός ωμών – έτοιμων προϊόντων",
+      "Όρια θερμοκρασίας βιτρίνας σαλάτας / τοστ (≤7°C, έκθεση ≤4 ώρες)",
+      "Παρασκευή σάντουιτς (<12°C, χρόνος <4 ώρες)",
+      "Πλύσιμο & χειρισμός λαχανικών",
+    ],
+  },
+  {
+    id: "coffee",
+    title: "Καφές",
+    note: "Για θέση μπάρας καφέ.",
+    topics: [
+      "Χρήση μηχανής καφέ / γρανιτομηχανής / fredoccino",
+      "Καθαριότητα εξοπλισμού καφέ (καθημερινή / εβδομαδιαία)",
+      "Σωστή διατήρηση γαλακτοκομικών (ψυγείο καφέ)",
+    ],
+  },
+];
+
+const TRAINING_TEMPLATES = [
+  { id: "t1", title: "Υγιεινή & Ασφάλεια Τροφίμων (HACCP)", desc: "Βασικές αρχές HACCP, κρίσιμα σημεία ελέγχου, ορθές πρακτικές υγιεινής." },
+  { id: "t2", title: "Διάγραμμα Ροής Υγειονομικού Ενδιαφέροντος", desc: "Ροή προϊόντων από προμήθεια έως σερβίρισμα και κρίσιμα σημεία ελέγχου." },
+  { id: "t3", title: "Πυρασφάλεια", desc: "Κανόνες πυροπροστασίας, χρήση πυροσβεστήρα, οδεύσεις διαφυγής." },
+  { id: "t4", title: "Πρώτες Βοήθειες", desc: "Βασικές ενέργειες πρώτων βοηθειών στον χώρο εργασίας." },
+  { id: "t5", title: "Χρήση Μηχανημάτων Κουζίνας", desc: "Ασφαλής χρήση φριτέζας, φούρνου, μηχανών καφέ και παγωτού." },
+];
+
+const CORRECTIVE_ACTIONS = [
+  "Μεταφορά προϊόντων σε άλλο ψυγείο/κατάψυξη",
+  "Απόρριψη προϊόντων",
+  "Κλήση τεχνικού",
+  "Ρύθμιση θερμοστάτη",
+  "Επανέλεγχος σε λίγο",
+  "Ενημέρωση υπευθύνου",
+];
+
+const OIL_CORRECTIVE_ACTIONS = [
+  "Διόρθωση θερμοκρασίας",
+  "Άμεση αλλαγή λαδιού",
+  "Φιλτράρισμα λαδιού",
+  "Απόρριψη προϊόντων παρτίδας",
+  "Κλήση τεχνικού",
+  "Ενημέρωση υπευθύνου",
+];
+
+const HEALTH_WARN_DAYS = 30;
+
+const DEFAULT_BUSINESS_INFO = {
+  title: "BREWTOPIA",
+  name: "ΑΦΟΙ ΓΛΕΝΤΖΑΚΗ Ε.Π.Ε",
+  afm: "999962477",
+  type: "ΑΝΑΨΥΚΤΗΡΙΟ",
+  address: "Λ. Κηφισίας 4, Αθήνα",
+};
+
+// Κεφαλίδα επιχείρησης για PDF (React) — στιλιζαρισμένο κείμενο τύπου λογότυπου
+const PrintLetterhead = ({ info }) => (
+  <div style={{ borderBottom: "3px solid #ea580c", paddingBottom: 8, marginBottom: 14 }}>
+    <p style={{ fontSize: 22, fontWeight: 900, color: "#ea580c", letterSpacing: 0.5, margin: 0 }}>{info.title}</p>
+    <p style={{ fontSize: 10, color: "#334155", margin: "2px 0 0" }}>
+      {info.name} {info.afm && `· ΑΦΜ ${info.afm}`} {info.type && `· ${info.type}`}
+    </p>
+    {info.address && <p style={{ fontSize: 10, color: "#64748b", margin: 0 }}>{info.address}</p>}
+  </div>
+);
+
+// Κεφαλίδα επιχείρησης on-screen (μη-εκτυπωτική), π.χ. πάνω από το διάγραμμα HACCP
+const ScreenLetterhead = ({ info }) => (
+  <div className="border-b-4 border-orange-500 pb-2 mb-4">
+    <p className="text-2xl font-black text-orange-600 tracking-wide">{info.title}</p>
+    <p className="text-xs text-slate-600 mt-0.5">
+      {info.name} {info.afm && `· ΑΦΜ ${info.afm}`} {info.type && `· ${info.type}`}
+    </p>
+    {info.address && <p className="text-xs text-slate-400">{info.address}</p>}
+  </div>
+);
+
+const WEEKDAYS = [
+  { idx: 1, label: "Δε" }, { idx: 2, label: "Τρ" }, { idx: 3, label: "Τε" }, { idx: 4, label: "Πε" },
+  { idx: 5, label: "Πα" }, { idx: 6, label: "Σα" }, { idx: 0, label: "Κυ" },
+];
+
+function isoDatesInRange(fromISO, toISO) {
+  const out = [];
+  let d = new Date(fromISO + "T00:00:00");
+  const end = new Date(toISO + "T00:00:00");
+  let guard = 0;
+  while (d <= end && guard < 400) {
+    out.push(d.toISOString().slice(0, 10));
+    d.setDate(d.getDate() + 1);
+    guard++;
+  }
+  return out;
+}
+
+function lastScheduledOnOrBefore(days, dateISO) {
+  if (!days || days.length === 0) return null;
+  let d = new Date(dateISO + "T00:00:00");
+  for (let i = 0; i < 8; i++) {
+    if (days.includes(d.getDay())) return d.toISOString().slice(0, 10);
+    d.setDate(d.getDate() - 1);
+  }
+  return null;
+}
+
+function wasCleanDoneInRange(cleanData, areaId, itemId, fromISO, toISO) {
+  const key = `${areaId}__${itemId}`;
+  for (const date of isoDatesInRange(fromISO, toISO)) {
+    const mk = date.slice(0, 7);
+    const dayEntry = cleanData?.[mk]?.[date];
+    if (!dayEntry) continue;
+    for (const s of SHIFTS) {
+      const v = dayEntry?.[s]?.[key];
+      if (v === "✓" || v === "*") return true;
+    }
+  }
+  return false;
+}
+
+function shouldShowCleanItem(item, cleanData, areaId, refDateISO) {
+  if (!item.days || item.days.length === 0) return true;
+  const lastSched = lastScheduledOnOrBefore(item.days, refDateISO);
+  if (!lastSched) return true;
+  return !wasCleanDoneInRange(cleanData, areaId, item.id, lastSched, refDateISO);
+}
+
+const SHIFT_RANGES = { Α: [6, 14], Β: [14, 22], Γ: [22, 6] }; // ώρες έναρξης/λήξης (Γ διασχίζει τα μεσάνυχτα)
+
+function getActiveShift(d = new Date()) {
+  const h = d.getHours() + d.getMinutes() / 60;
+  if (h >= 6 && h < 14) return "Α";
+  if (h >= 14 && h < 22) return "Β";
+  return "Γ";
+}
+function minutesUntilShiftEnd(d = new Date()) {
+  const h = d.getHours() + d.getMinutes() / 60;
+  const shift = getActiveShift(d);
+  let diff;
+  if (shift === "Γ") diff = h >= 22 ? (30 - h) : (6 - h);
+  else diff = SHIFT_RANGES[shift][1] - h;
+  return Math.max(0, Math.round(diff * 60));
+}
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const monthKey = (d = new Date()) => d.toISOString().slice(0, 7);
+const uid = () => Math.random().toString(36).slice(2, 10);
+const daysUntil = (iso) => {
+  if (!iso) return null;
+  const diff = (new Date(iso) - new Date(todayISO())) / 86400000;
+  return Math.round(diff);
+};
+
+/* ============================================================
+   STORAGE HOOK
+   ============================================================ */
+const STORAGE_PREFIX = "brewtopia:";
+
+function useStore(key, initial) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = window.localStorage.getItem(STORAGE_PREFIX + key);
+      return raw ? JSON.parse(raw) : initial;
+    } catch (e) {
+      return initial;
+    }
+  });
+  const loaded = true; // localStorage είναι σύγχρονο — φορτωμένο αμέσως
+
+  const persist = useCallback((next) => {
+    setValue(next);
+    try {
+      window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(next));
+    } catch (e) {
+      console.error("Αποτυχία αποθήκευσης", e);
+    }
+  }, [key]);
+
+  return [value, persist, loaded];
+}
+
+/* ============================================================
+   ΜΙΚΡΑ UI ΣΤΟΙΧΕΙΑ
+   ============================================================ */
+
+const CorrectiveActionPanel = ({ value, onChange, actions = CORRECTIVE_ACTIONS }) => {
+  const v = value || { options: [], note: "" };
+  const resolved = v.options.length > 0 || v.note.trim() !== "";
+  const toggle = (opt) => {
+    const opts = v.options.includes(opt) ? v.options.filter((x) => x !== opt) : [...v.options, opt];
+    onChange({ ...v, options: opts });
+  };
+  return (
+    <div className="mt-1.5 mb-2 p-2 rounded-lg border-2 border-red-200 bg-red-50 w-full">
+      <p className="text-[11px] font-bold text-red-700 mb-1.5 flex items-center gap-1">
+        <AlertTriangle size={12} /> {resolved ? "Διορθωτική ενέργεια καταγράφηκε" : "Απαιτείται διορθωτική ενέργεια"}
+      </p>
+      <div className="flex flex-wrap gap-1.5 mb-1.5">
+        {actions.map((opt) => (
+          <button
+            key={opt}
+            onClick={() => toggle(opt)}
+            className={`text-[10px] px-2 py-1 rounded-full border font-semibold ${
+              v.options.includes(opt) ? "bg-red-600 text-white border-red-600" : "border-red-300 text-red-600 bg-white"
+            }`}
+          >{opt}</button>
+        ))}
+      </div>
+      <input
+        placeholder="Άλλη σημείωση (προαιρετικό)…"
+        className="w-full border border-red-200 rounded-lg px-2 py-1 text-[11px]"
+        value={v.note}
+        onChange={(e) => onChange({ ...v, note: e.target.value })}
+      />
+    </div>
+  );
+};
+
+const Stamp = ({ ok, textOk = "ΕΝΤΟΣ ΟΡΙΩΝ", textBad = "ΕΚΤΟΣ ΟΡΙΩΝ" }) => (
+  <span
+    className={`inline-block px-2 py-0.5 text-[10px] font-bold tracking-widest uppercase border-2 rounded
+      ${ok ? "border-teal-700 text-teal-700" : "border-red-600 text-red-600"}`}
+    style={{ transform: "rotate(-2deg)" }}
+  >
+    {ok ? textOk : textBad}
+  </span>
+);
+
+const LimitBadge = ({ children }) => (
+  <span className="inline-flex items-center gap-1 bg-slate-800 text-white text-[11px] font-bold px-2 py-0.5 rounded-md ml-1.5 align-middle">
+    {children}
+  </span>
+);
+
+/* ============================================================
+   ΕΚΤΥΠΩΣΗ / ΕΞΑΓΩΓΗ PDF
+   ============================================================ */
+const PrintStyles = () => (
+  <style>{`
+    @media print {
+      body * { visibility: hidden; }
+      #print-root, #print-root * { visibility: visible; }
+      #print-root { position: absolute; top: 0; left: 0; width: 100%; padding: 16px; }
+      .no-print { display: none !important; }
+    }
+  `}</style>
+);
+
+function PrintButton({ onClick, children = "Εκτύπωση / Αποθήκευση ως PDF" }) {
+  return (
+    <button
+      onClick={onClick}
+      className="no-print text-xs px-3 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1.5 text-slate-600"
+    >
+      <FileSignature size={13} /> {children}
+    </button>
+  );
+}
+
+const SectionTitle = ({ icon: Icon, children, sub }) => (
+  <div className="mb-4">
+    <div className="flex items-center gap-2 text-teal-800">
+      <Icon size={20} />
+      <h2 className="text-lg font-bold uppercase tracking-wide">{children}</h2>
+    </div>
+    {sub && <p className="text-sm text-slate-500 mt-0.5">{sub}</p>}
+  </div>
+);
+
+const Card = ({ children, className = "" }) => (
+  <div className={`bg-white border border-slate-200 rounded-xl shadow-sm p-4 ${className}`}>{children}</div>
+);
+
+const Field = ({ label, children }) => (
+  <label className="block mb-3">
+    <span className="block text-xs font-semibold uppercase tracking-wide text-slate-500 mb-1">{label}</span>
+    {children}
+  </label>
+);
+
+const inputCls = "w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-teal-600";
+
+// Πεδίο θερμοκρασίας που δέχεται αρνητικές τιμές κανονικά σε κινητό (χωρίς το πρόβλημα του type=number keypad)
+const TempInput = ({ value, onChange, className = "" }) => {
+  const handleChange = (e) => {
+    let v = e.target.value.replace(",", ".");
+    // επιτρέπει μόνο: προαιρετικό μείον στην αρχή, ψηφία, μία τελεία
+    v = v.replace(/[^0-9.\-]/g, "");
+    v = v.replace(/(?!^)-/g, ""); // μείον μόνο στην αρχή
+    v = v.replace(/(\..*)\./g, "$1"); // μία μόνο τελεία
+    onChange(v);
+  };
+  const toggleSign = () => {
+    if (value === "" || value === undefined) { onChange("-"); return; }
+    onChange(value.startsWith("-") ? value.slice(1) : "-" + value);
+  };
+  return (
+    <div className={`flex items-center gap-1 ${className}`}>
+      <button
+        type="button"
+        onClick={toggleSign}
+        className="w-7 h-7 shrink-0 rounded-lg border border-slate-300 text-slate-500 font-bold text-sm flex items-center justify-center"
+        aria-label="Εναλλαγή προσήμου"
+      >±</button>
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder="°C"
+        className="w-20 border border-slate-300 rounded-lg px-2 py-1 text-sm text-right"
+        value={value ?? ""}
+        onChange={handleChange}
+      />
+    </div>
+  );
+};
+
+/* ============================================================
+   SIGNATURE PAD
+   ============================================================ */
+function SignaturePad({ onSave, onCancel }) {
+  const canvasRef = useRef(null);
+  const drawing = useRef(false);
+  const empty = useRef(true);
+
+  const getPos = (e, canvas) => {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  };
+
+  const start = (e) => {
+    e.preventDefault();
+    drawing.current = true;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const { x, y } = getPos(e, canvas);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  };
+  const move = (e) => {
+    if (!drawing.current) return;
+    e.preventDefault();
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const { x, y } = getPos(e, canvas);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = "round";
+    ctx.stroke();
+    empty.current = false;
+  };
+  const end = () => { drawing.current = false; };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+    empty.current = true;
+  };
+
+  return (
+    <div className="border-2 border-dashed border-teal-300 rounded-lg p-3 bg-teal-50/40">
+      <canvas
+        ref={canvasRef}
+        width={320}
+        height={140}
+        className="bg-white border border-slate-300 rounded-lg touch-none w-full"
+        style={{ maxWidth: 320 }}
+        onMouseDown={start} onMouseMove={move} onMouseUp={end} onMouseLeave={end}
+        onTouchStart={start} onTouchMove={move} onTouchEnd={end}
+      />
+      <div className="flex gap-2 mt-2">
+        <button onClick={clear} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 flex items-center gap-1">
+          <RotateCcw size={13} /> Καθαρισμός
+        </button>
+        <button
+          onClick={() => {
+            if (empty.current) return;
+            onSave(canvasRef.current.toDataURL("image/png"));
+          }}
+          className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white flex items-center gap-1"
+        >
+          <Check size={13} /> Καταχώρηση υπογραφής
+        </button>
+        {onCancel && (
+          <button onClick={onCancel} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 ml-auto">Άκυρο</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: ΠΡΟΣΩΠΙΚΟ
+   ============================================================ */
+function EmployeesTab({ employees, setEmployees }) {
+  const [form, setForm] = useState(null);
+  const [sortDir, setSortDir] = useState(null); // null | "asc" | "desc"
+
+  const startNew = () => setForm({ id: uid(), name: "", phone: "", position: "", hireDate: "", healthExpiry: "" });
+
+  const save = () => {
+    if (!form.name.trim()) return;
+    const exists = employees.some((e) => e.id === form.id);
+    const next = exists ? employees.map((e) => (e.id === form.id ? form : e)) : [...employees, form];
+    setEmployees(next);
+    setForm(null);
+  };
+
+  const remove = (id) => setEmployees(employees.filter((e) => e.id !== id));
+
+  const displayed = [...employees];
+  if (sortDir) {
+    displayed.sort((a, b) => {
+      if (!a.hireDate) return 1;
+      if (!b.hireDate) return -1;
+      return sortDir === "asc" ? a.hireDate.localeCompare(b.hireDate) : b.hireDate.localeCompare(a.hireDate);
+    });
+  }
+
+  return (
+    <div>
+      <SectionTitle icon={Users} sub="Καρτέλες εργαζομένων, βιβλιάριο υγείας, ιστορικό εκπαίδευσης.">
+        Προσωπικό
+      </SectionTitle>
+
+      <div className="flex items-center gap-2 mb-3">
+        {!form && (
+          <button onClick={startNew} className="flex items-center gap-1.5 bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+            <Plus size={16} /> Νέος εργαζόμενος
+          </button>
+        )}
+        <div className="flex gap-1 ml-auto">
+          <button
+            onClick={() => setSortDir(sortDir === "asc" ? null : "asc")}
+            className={`text-[11px] px-2.5 py-1.5 rounded-lg border font-semibold ${sortDir === "asc" ? "bg-slate-800 text-white border-slate-800" : "border-slate-300 text-slate-500"}`}
+          >Παλιότεροι ↑</button>
+          <button
+            onClick={() => setSortDir(sortDir === "desc" ? null : "desc")}
+            className={`text-[11px] px-2.5 py-1.5 rounded-lg border font-semibold ${sortDir === "desc" ? "bg-slate-800 text-white border-slate-800" : "border-slate-300 text-slate-500"}`}
+          >Νεότεροι ↓</button>
+        </div>
+      </div>
+
+      {form && (
+        <Card className="mb-4">
+          <Field label="Ονοματεπώνυμο">
+            <input className={inputCls} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          </Field>
+          <Field label="Τηλέφωνο">
+            <input className={inputCls} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+          </Field>
+          <Field label="Θέση">
+            <input className={inputCls} value={form.position} onChange={(e) => setForm({ ...form, position: e.target.value })} />
+          </Field>
+          <Field label="Ημερομηνία πρόσληψης">
+            <input type="date" className={inputCls} value={form.hireDate} onChange={(e) => setForm({ ...form, hireDate: e.target.value })} />
+          </Field>
+          <Field label="Λήξη βιβλιαρίου υγείας">
+            <input type="date" className={inputCls} value={form.healthExpiry} onChange={(e) => setForm({ ...form, healthExpiry: e.target.value })} />
+          </Field>
+          <div className="flex gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-1">
+              <Save size={14} /> Αποθήκευση
+            </button>
+            <button onClick={() => setForm(null)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </Card>
+      )}
+
+      <div className="space-y-2">
+        {employees.length === 0 && <p className="text-sm text-slate-400">Δεν έχουν καταχωρηθεί εργαζόμενοι ακόμα.</p>}
+        {displayed.map((e) => {
+          const dLeft = daysUntil(e.healthExpiry);
+          let badge = null;
+          if (e.healthExpiry) {
+            if (dLeft < 0) badge = <Stamp ok={false} textBad="ΛΗΓΜΕΝΟ ΒΙΒΛΙΑΡΙΟ" />;
+            else if (dLeft <= HEALTH_WARN_DAYS) badge = <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-amber-500 text-amber-600">Λήγει σε {dLeft} ημ.</span>;
+            else badge = <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded border-2 border-teal-600 text-teal-700">Βιβλιάριο εντάξει</span>;
+          }
+          return (
+            <Card key={e.id} className="flex items-center justify-between">
+              <div>
+                <p className="font-semibold text-slate-800">{e.name}</p>
+                <p className="text-xs text-slate-500">{e.position || "—"} · {e.phone || "χωρίς τηλέφωνο"}</p>
+                <div className="mt-1">{badge}</div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setForm(e)} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg">Επεξεργασία</button>
+                <button onClick={() => remove(e.id)} className="text-xs px-2 py-1.5 border border-red-200 text-red-600 rounded-lg"><Trash2 size={14} /></button>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: ΕΚΠΑΙΔΕΥΣΗ
+   ============================================================ */
+function TrainingPrintSheet({ session, employees, businessInfo }) {
+  return (
+    <div style={{ fontFamily: "sans-serif", color: "#111" }}>
+      <PrintLetterhead info={businessInfo} />
+      <h1 style={{ fontSize: 18, marginBottom: 2 }}>Έντυπο Σεμιναρίου Εκπαίδευσης</h1>
+      <p style={{ fontSize: 13, margin: "2px 0" }}><b>Θέμα:</b> {session.title}</p>
+      <p style={{ fontSize: 13, margin: "2px 0" }}><b>Ημερομηνία:</b> {session.date} &nbsp; <b>Διάρκεια:</b> {session.duration || "—"}ω</p>
+      <p style={{ fontSize: 13, margin: "2px 0" }}><b>Τόπος:</b> {session.location || "—"} &nbsp; <b>Εισηγητής:</b> {session.trainer || "—"}</p>
+      {session.topics && <p style={{ fontSize: 12, margin: "6px 0", whiteSpace: "pre-wrap" }}>{session.topics}</p>}
+      <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 10 }}>
+        <thead>
+          <tr>
+            <th style={{ border: "1px solid #999", padding: 4, fontSize: 12, textAlign: "left" }}>#</th>
+            <th style={{ border: "1px solid #999", padding: 4, fontSize: 12, textAlign: "left" }}>Ονοματεπώνυμο</th>
+            <th style={{ border: "1px solid #999", padding: 4, fontSize: 12, textAlign: "left" }}>Υπογραφή</th>
+          </tr>
+        </thead>
+        <tbody>
+          {session.participantIds.map((pid, i) => {
+            const emp = employees.find((e) => e.id === pid);
+            const sig = session.signatures?.[pid];
+            return (
+              <tr key={pid}>
+                <td style={{ border: "1px solid #999", padding: 4, fontSize: 12 }}>{i + 1}</td>
+                <td style={{ border: "1px solid #999", padding: 4, fontSize: 12 }}>{emp ? emp.name : "—"}</td>
+                <td style={{ border: "1px solid #999", padding: 4, height: 34 }}>
+                  {sig ? <img src={sig.img} alt="" style={{ height: 28 }} /> : ""}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PackagePrintSheet({ pkg, employee, record, businessInfo }) {
+  return (
+    <div style={{ fontFamily: "sans-serif", color: "#111" }}>
+      <PrintLetterhead info={businessInfo} />
+      <h1 style={{ fontSize: 18, marginBottom: 2 }}>Έντυπο Εκπαίδευσης — {pkg.title}</h1>
+      <p style={{ fontSize: 13, margin: "2px 0" }}><b>Εργαζόμενος:</b> {employee?.name}</p>
+      <p style={{ fontSize: 13, margin: "2px 0" }}><b>Ημερομηνία:</b> {record.date}</p>
+      <ul style={{ marginTop: 10 }}>
+        {pkg.topics.map((t) => (
+          <li key={t} style={{ fontSize: 12, marginBottom: 4 }}>☑ {t}</li>
+        ))}
+      </ul>
+      <p style={{ fontSize: 13, marginTop: 16 }}><b>Υπογραφή εργαζομένου:</b></p>
+      {record.signature && <img src={record.signature.img} alt="" style={{ height: 36, marginTop: 4 }} />}
+    </div>
+  );
+}
+
+function TrainingPackagesPanel({ employees, completions, setCompletions, requestPrint, businessInfo }) {
+  const [openPkg, setOpenPkg] = useState(null);
+  const [activeEmp, setActiveEmp] = useState(null);
+  const [checked, setChecked] = useState([]);
+  const [signing, setSigning] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [bulkSelected, setBulkSelected] = useState([]);
+
+  const findRecord = (pkgId, empId) => completions.find((c) => c.packageId === pkgId && c.employeeId === empId);
+
+  const startFill = (pkgId, empId) => {
+    const existing = findRecord(pkgId, empId);
+    setActiveEmp(empId);
+    setChecked(existing ? existing.checkedTopics : []);
+    setSigning(false);
+  };
+
+  const toggleTopic = (topic) => {
+    setChecked((c) => (c.includes(topic) ? c.filter((x) => x !== topic) : [...c, topic]));
+  };
+
+  const saveSignature = (pkg, dataUrl) => {
+    const rec = { id: uid(), packageId: pkg.id, employeeId: activeEmp, date: todayISO(), checkedTopics: checked, signature: { img: dataUrl, at: new Date().toISOString() } };
+    const others = completions.filter((c) => !(c.packageId === pkg.id && c.employeeId === activeEmp));
+    setCompletions([rec, ...others]);
+    setActiveEmp(null);
+    setSigning(false);
+  };
+
+  const toggleBulkSelect = (empId) => {
+    setBulkSelected((s) => (s.includes(empId) ? s.filter((x) => x !== empId) : [...s, empId]));
+  };
+
+  const applyBulkCheckAll = (pkg) => {
+    const others = completions.filter((c) => !(c.packageId === pkg.id && bulkSelected.includes(c.employeeId)));
+    const drafts = bulkSelected.map((empId) => {
+      const existing = findRecord(pkg.id, empId);
+      return { id: existing?.id || uid(), packageId: pkg.id, employeeId: empId, date: todayISO(), checkedTopics: [...pkg.topics], signature: existing?.signature || null };
+    });
+    setCompletions([...drafts, ...others]);
+    setBulkSelected([]);
+    setBulkMode(false);
+  };
+
+  return (
+    <div className="space-y-3 mb-4">
+      {TRAINING_PACKAGES.map((pkg) => {
+        const isOpen = openPkg === pkg.id;
+        return (
+          <Card key={pkg.id}>
+            <button className="w-full flex items-center justify-between text-left" onClick={() => { setOpenPkg(isOpen ? null : pkg.id); setActiveEmp(null); setBulkMode(false); setBulkSelected([]); }}>
+              <div>
+                <p className="font-semibold text-slate-800">{pkg.title}</p>
+                <p className="text-xs text-slate-500">{pkg.note}</p>
+              </div>
+              <ChevronRight size={16} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
+            </button>
+
+            {isOpen && (
+              <div className="mt-3 border-t border-slate-100 pt-3 space-y-2">
+                {employees.length === 0 && <p className="text-xs text-slate-400">Καταχώρησε πρώτα εργαζομένους στην καρτέλα «Προσωπικό».</p>}
+
+                {employees.length > 0 && (
+                  <div className="flex items-center justify-between mb-1">
+                    <button
+                      onClick={() => { setBulkMode((v) => !v); setBulkSelected([]); }}
+                      className="text-[11px] text-teal-700 underline"
+                    >
+                      {bulkMode ? "Ακύρωση μαζικής επιλογής" : "Μαζική προεπιλογή θεμάτων για πολλούς"}
+                    </button>
+                    {bulkMode && bulkSelected.length > 0 && (
+                      <button onClick={() => applyBulkCheckAll(pkg)} className="text-xs font-semibold bg-teal-700 text-white px-3 py-1.5 rounded-lg">
+                        Τσεκάρισμα όλων ({bulkSelected.length})
+                      </button>
+                    )}
+                  </div>
+                )}
+                {bulkMode && (
+                  <p className="text-[11px] text-slate-500 mb-1">
+                    Επίλεξε εργαζομένους — θα τσεκαριστούν αυτόματα όλα τα θέματα του πακέτου για τον καθένα. Η υπογραφή γίνεται μετά, ατομικά, από τον καθένα.
+                  </p>
+                )}
+
+                {employees.map((emp) => {
+                  const rec = findRecord(pkg.id, emp.id);
+                  const isActive = activeEmp === emp.id;
+                  const pendingSignature = rec && !rec.signature;
+                  return (
+                    <div key={emp.id} className="border border-slate-100 rounded-lg p-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-slate-700 flex items-center gap-2">
+                          {bulkMode && (
+                            <input
+                              type="checkbox"
+                              className="w-4 h-4 accent-teal-700"
+                              checked={bulkSelected.includes(emp.id)}
+                              onChange={() => toggleBulkSelect(emp.id)}
+                            />
+                          )}
+                          {emp.name}
+                        </span>
+                        {!bulkMode && (
+                          rec?.signature ? (
+                            <span className="text-[10px] font-bold uppercase px-2 py-1 rounded border-2 border-teal-600 text-teal-700">Ολοκληρώθηκε {rec.date}</span>
+                          ) : pendingSignature ? (
+                            <button onClick={() => startFill(pkg.id, emp.id)} className="text-xs px-3 py-1.5 rounded-lg bg-amber-500 text-white font-semibold">Εκκρεμεί υπογραφή</button>
+                          ) : (
+                            <button onClick={() => startFill(pkg.id, emp.id)} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white">Συμπλήρωση</button>
+                          )
+                        )}
+                      </div>
+
+                      {!bulkMode && rec?.signature && !isActive && (
+                        <div className="mt-2">
+                          <PrintButton onClick={() => requestPrint(<PackagePrintSheet pkg={pkg} employee={emp} record={rec} businessInfo={businessInfo} />)}>Εκτύπωση</PrintButton>
+                          <button onClick={() => startFill(pkg.id, emp.id)} className="text-[11px] text-teal-700 underline ml-3">Επανάληψη / ενημέρωση</button>
+                        </div>
+                      )}
+
+                      {!bulkMode && isActive && (
+                        <div className="mt-2 space-y-2">
+                          {pkg.topics.map((t) => (
+                            <label key={t} className="flex items-start gap-2 text-xs text-slate-700">
+                              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-teal-700" checked={checked.includes(t)} onChange={() => toggleTopic(t)} />
+                              {t}
+                            </label>
+                          ))}
+                          {!signing ? (
+                            <button
+                              onClick={() => setSigning(true)}
+                              disabled={checked.length !== pkg.topics.length}
+                              className="w-full mt-2 bg-slate-800 disabled:bg-slate-300 text-white rounded-lg py-2 text-sm font-semibold flex items-center justify-center gap-1.5"
+                            >
+                              <FileSignature size={14} /> {checked.length !== pkg.topics.length ? `Τσέκαρε όλα τα θέματα (${checked.length}/${pkg.topics.length})` : "Προχώρα σε υπογραφή"}
+                            </button>
+                          ) : (
+                            <SignaturePad onSave={(d) => saveSignature(pkg, d)} onCancel={() => setSigning(false)} />
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+function TrainingTab({ employees, sessions, setSessions, requestPrint, packageCompletions, setPackageCompletions, businessInfo }) {
+  const [creating, setCreating] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [signing, setSigning] = useState(null); // {sessionId, employeeId}
+  const [openSession, setOpenSession] = useState(null);
+
+  const startNew = () => {
+    setDraft({
+      id: uid(), templateId: "", title: "", date: todayISO(), duration: "", location: "",
+      trainer: "", topics: "", participantIds: [], signatures: {},
+    });
+    setCreating(true);
+  };
+
+  const save = () => {
+    if (!draft.title.trim()) return;
+    setSessions([draft, ...sessions]);
+    setCreating(false);
+    setDraft(null);
+  };
+
+  const toggleParticipant = (id) => {
+    setDraft((d) => ({
+      ...d,
+      participantIds: d.participantIds.includes(id)
+        ? d.participantIds.filter((x) => x !== id)
+        : [...d.participantIds, id],
+    }));
+  };
+
+  const applySignature = (sessionId, employeeId, dataUrl) => {
+    setSessions(sessions.map((s) =>
+      s.id === sessionId
+        ? { ...s, signatures: { ...s.signatures, [employeeId]: { img: dataUrl, at: new Date().toISOString() } } }
+        : s
+    ));
+    setSigning(null);
+  };
+
+  return (
+    <div>
+      <SectionTitle icon={GraduationCap} sub="Έντυπα εκπαίδευσης, σεμινάρια, ψηφιακή υπογραφή εργαζομένων.">
+        Εκπαίδευση Προσωπικού
+      </SectionTitle>
+
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Πακέτα εκπαίδευσης ανά θέση</p>
+      <TrainingPackagesPanel employees={employees} completions={packageCompletions} setCompletions={setPackageCompletions} requestPrint={requestPrint} businessInfo={businessInfo} />
+
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Μεμονωμένα σεμινάρια</p>
+      <Card className="mb-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">Διαθέσιμα έντυπα / θεματολογία</p>
+        <div className="grid gap-2">
+          {TRAINING_TEMPLATES.map((t) => (
+            <div key={t.id} className="border border-slate-200 rounded-lg p-2.5 text-sm">
+              <p className="font-semibold text-slate-700">{t.title}</p>
+              <p className="text-xs text-slate-500">{t.desc}</p>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {!creating && (
+        <button onClick={startNew} className="mb-4 flex items-center gap-1.5 bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+          <Plus size={16} /> Νέο σεμινάριο εκπαίδευσης
+        </button>
+      )}
+
+      {creating && draft && (
+        <Card className="mb-4">
+          <Field label="Θέμα σεμιναρίου">
+            <select
+              className={inputCls}
+              value={draft.templateId}
+              onChange={(e) => {
+                const t = TRAINING_TEMPLATES.find((x) => x.id === e.target.value);
+                setDraft({ ...draft, templateId: e.target.value, title: t ? t.title : draft.title });
+              }}
+            >
+              <option value="">— Επιλογή προτύπου (ή γράψε δικό σου τίτλο) —</option>
+              {TRAINING_TEMPLATES.map((t) => <option key={t.id} value={t.id}>{t.title}</option>)}
+            </select>
+          </Field>
+          <Field label="Τίτλος">
+            <input className={inputCls} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ημερομηνία">
+              <input type="date" className={inputCls} value={draft.date} onChange={(e) => setDraft({ ...draft, date: e.target.value })} />
+            </Field>
+            <Field label="Διάρκεια (ώρες)">
+              <input className={inputCls} value={draft.duration} onChange={(e) => setDraft({ ...draft, duration: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Τόπος">
+            <input className={inputCls} value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} />
+          </Field>
+          <Field label="Εισηγητής">
+            <input className={inputCls} value={draft.trainer} onChange={(e) => setDraft({ ...draft, trainer: e.target.value })} />
+          </Field>
+          <Field label="Θεματολογία (Α, Β, Γ…)">
+            <textarea rows={3} className={inputCls} value={draft.topics} onChange={(e) => setDraft({ ...draft, topics: e.target.value })} />
+          </Field>
+          <Field label="Συμμετέχοντες">
+            <div className="flex flex-wrap gap-2">
+              {employees.map((e) => (
+                <button
+                  key={e.id}
+                  onClick={() => toggleParticipant(e.id)}
+                  className={`text-xs px-3 py-1.5 rounded-full border ${
+                    draft.participantIds.includes(e.id) ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-600"
+                  }`}
+                >
+                  {e.name}
+                </button>
+              ))}
+              {employees.length === 0 && <p className="text-xs text-slate-400">Καταχώρησε πρώτα εργαζομένους στην καρτέλα «Προσωπικό».</p>}
+            </div>
+          </Field>
+          <div className="flex gap-2 mt-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-1">
+              <Save size={14} /> Δημιουργία σεμιναρίου
+            </button>
+            <button onClick={() => { setCreating(false); setDraft(null); }} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </Card>
+      )}
+
+      <div className="space-y-2">
+        {sessions.map((s) => {
+          const signedCount = Object.keys(s.signatures || {}).length;
+          const isOpen = openSession === s.id;
+          return (
+            <Card key={s.id}>
+              <button className="w-full flex items-center justify-between text-left" onClick={() => setOpenSession(isOpen ? null : s.id)}>
+                <div>
+                  <p className="font-semibold text-slate-800">{s.title}</p>
+                  <p className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+                    <Calendar size={12} /> {s.date} {s.duration && <>· <Clock size={12} /> {s.duration}ω</>}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-bold uppercase px-2 py-1 rounded border-2 border-teal-600 text-teal-700">
+                    {signedCount}/{s.participantIds.length} υπέγραψαν
+                  </span>
+                  <ChevronRight size={16} className={`transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                </div>
+              </button>
+
+              {isOpen && (
+                <div className="mt-3 border-t border-slate-100 pt-3 space-y-2">
+                  {s.topics && <p className="text-xs text-slate-600 whitespace-pre-wrap mb-2">{s.topics}</p>}
+                  {s.participantIds.map((pid) => {
+                    const emp = employees.find((e) => e.id === pid);
+                    if (!emp) return null;
+                    const sig = s.signatures?.[pid];
+                    const isSigning = signing && signing.sessionId === s.id && signing.employeeId === pid;
+                    return (
+                      <div key={pid} className="flex items-center justify-between gap-2 border border-slate-100 rounded-lg p-2">
+                        <span className="text-sm text-slate-700">{emp.name}</span>
+                        {sig ? (
+                          <img src={sig.img} alt="υπογραφή" className="h-9 border border-slate-200 rounded bg-white" />
+                        ) : (
+                          <button
+                            onClick={() => setSigning({ sessionId: s.id, employeeId: pid })}
+                            className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-white flex items-center gap-1"
+                          >
+                            <FileSignature size={13} /> Υπογραφή
+                          </button>
+                        )}
+                        {isSigning && (
+                          <div className="w-full">
+                            <SignaturePad
+                              onSave={(d) => applySignature(s.id, pid, d)}
+                              onCancel={() => setSigning(null)}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  <div className="pt-1">
+                    <PrintButton onClick={() => requestPrint(<TrainingPrintSheet session={s} employees={employees} businessInfo={businessInfo} />)} />
+                  </div>
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: ΗΜΕΡΗΣΙΕΣ ΚΑΤΑΓΡΑΦΕΣ (CCP + ΚΑΘΑΡΙΟΤΗΤΑ + ΛΑΔΙ)
+   ============================================================ */
+function MonthlyFullPrintSheet({ mk, stations, displayItems, cleaningAreas, ccpData, cleanData, oilData, shiftNames, businessInfo }) {
+  const dateSet = new Set([
+    ...Object.keys(ccpData?.[mk] || {}),
+    ...Object.keys(cleanData?.[mk] || {}),
+    ...Object.keys(oilData?.[mk] || {}),
+  ]);
+  const days = [...dateSet].sort();
+  const th = { border: "1px solid #999", padding: 3, fontSize: 9, textAlign: "left", background: "#eee" };
+  const td = { border: "1px solid #999", padding: 3, fontSize: 9 };
+
+  return (
+    <div style={{ fontFamily: "sans-serif", color: "#111" }}>
+      <PrintLetterhead info={businessInfo} />
+      <h1 style={{ fontSize: 16, marginBottom: 10 }}>Μηνιαία Καταγραφή Ποιότητας — {mk}</h1>
+      {days.length === 0 && <p style={{ fontSize: 12 }}>Δεν υπάρχουν καταχωρήσεις για αυτόν τον μήνα.</p>}
+      {days.map((date, di) => (
+        <div key={date} style={{ marginTop: di === 0 ? 0 : 18, pageBreakBefore: di === 0 ? "auto" : "always" }}>
+          <h2 style={{ fontSize: 13, background: "#0f172a", color: "#fff", padding: "3px 6px", display: "inline-block" }}>{date}</h2>
+
+          <p style={{ fontSize: 10, fontWeight: "bold", marginTop: 8 }}>Θερμοκρασίες Ψυγείων / Κατάψυξης</p>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><th style={th}>Σταθμός</th>{SHIFTS.map((s) => <th key={s} style={th}>{shiftNames[s] || s}</th>)}</tr></thead>
+            <tbody>
+              {stations.filter((s) => s.type !== "dry").map((st) => (
+                <tr key={st.id}>
+                  <td style={td}>{st.name}</td>
+                  {SHIFTS.map((s) => {
+                    const v = ccpData?.[mk]?.[date]?.[s]?.[st.id];
+                    return <td key={s} style={v ? td : { ...td, color: "#b91c1c", fontStyle: "italic" }}>{v || "Δεν καταχωρήθηκε"}</td>;
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <p style={{ fontSize: 10, fontWeight: "bold", marginTop: 8 }}>Βιτρίνες</p>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><th style={th}>Βιτρίνα</th>{SHIFTS.map((s) => <th key={s} style={th}>{shiftNames[s] || s}</th>)}</tr></thead>
+            <tbody>
+              {displayItems.map((d) => (
+                <tr key={d.id}>
+                  <td style={td}>{d.name}</td>
+                  {SHIFTS.map((s) => <td key={s} style={td}>{ccpData?.[mk]?.[date]?.[s]?._display?.[d.id] ?? ""}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <p style={{ fontSize: 10, fontWeight: "bold", marginTop: 8 }}>Λάδι Τηγανίσματος</p>
+          <p style={{ fontSize: 10 }}>
+            Θερμοκρασία: {oilData?.[mk]?.[date]?.temp ?? "—"}°C &nbsp;·&nbsp;
+            Αλλαγή: {oilData?.[mk]?.[date]?.changed ? "Ναι" : "Όχι"}
+          </p>
+
+          <p style={{ fontSize: 10, fontWeight: "bold", marginTop: 8 }}>Καθαριότητα</p>
+          {cleaningAreas.map((group) => (
+            <div key={group.id} style={{ marginTop: 4 }}>
+              <p style={{ fontSize: 9, fontWeight: "bold", margin: "2px 0" }}>{group.area}</p>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr><th style={th}>Σημείο</th>{SHIFTS.map((s) => <th key={s} style={th}>{shiftNames[s] || s}</th>)}</tr></thead>
+                <tbody>
+                  {group.items.map((item) => {
+                    const key = `${group.id}__${item.id}`;
+                    return (
+                      <tr key={key}>
+                        <td style={td}>{item.name}</td>
+                        {SHIFTS.map((s) => <td key={s} style={{ ...td, textAlign: "center" }}>{cleanData?.[mk]?.[date]?.[s]?.[key] || ""}</td>)}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ))}
+
+          {(() => {
+            const rows = [];
+            SHIFTS.forEach((s) => {
+              const acts = ccpData?.[mk]?.[date]?.[s]?._actions || {};
+              Object.entries(acts).forEach(([stId, a]) => {
+                if (!a || (a.options.length === 0 && !a.note)) return;
+                const st = stations.find((x) => x.id === stId);
+                rows.push({ shift: shiftNames[s] || s, name: st ? st.name : stId, a });
+              });
+              const dActs = ccpData?.[mk]?.[date]?.[s]?._displayActions || {};
+              Object.entries(dActs).forEach(([dId, a]) => {
+                if (!a || (a.options.length === 0 && !a.note)) return;
+                const d = displayItems.find((x) => x.id === dId);
+                rows.push({ shift: shiftNames[s] || s, name: d ? d.name : dId, a });
+              });
+            });
+            const oilAction = oilData?.[mk]?.[date]?._action;
+            if (oilAction && (oilAction.options.length > 0 || oilAction.note)) {
+              rows.push({ shift: "—", name: "Λάδι τηγανίσματος", a: oilAction });
+            }
+            if (rows.length === 0) return null;
+            return (
+              <div style={{ marginTop: 8 }}>
+                <p style={{ fontSize: 10, fontWeight: "bold" }}>Διορθωτικές Ενέργειες</p>
+                <ul style={{ marginTop: 2 }}>
+                  {rows.map((r, i) => (
+                    <li key={i} style={{ fontSize: 9, marginBottom: 2 }}>
+                      <b>{r.name}</b> ({r.shift}): {[...r.a.options, r.a.note].filter(Boolean).join(" · ")}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })()}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function NewCleanItemForm({ onAdd }) {
+  const [name, setName] = useState("");
+  const [freq, setFreq] = useState("");
+  return (
+    <div className="flex gap-1.5 pt-1">
+      <input placeholder="Νέο σημείο…" value={name} onChange={(e) => setName(e.target.value)} className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-xs" />
+      <input placeholder="Συχνότητα" value={freq} onChange={(e) => setFreq(e.target.value)} className="w-24 border border-slate-300 rounded-lg px-2 py-1 text-xs" />
+      <button
+        onClick={() => { onAdd(name, freq); setName(""); setFreq(""); }}
+        className="w-7 h-7 shrink-0 rounded-lg bg-teal-700 text-white flex items-center justify-center"
+      ><Plus size={14} /></button>
+    </div>
+  );
+}
+
+function NewCleanAreaForm({ onAdd }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="flex gap-1.5">
+      <input placeholder="Νέα κατηγορία/περιοχή…" value={name} onChange={(e) => setName(e.target.value)} className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm" />
+      <button
+        onClick={() => { onAdd(name); setName(""); }}
+        className="px-3 rounded-lg bg-slate-800 text-white text-sm font-semibold flex items-center gap-1"
+      ><Plus size={14} /> Προσθήκη</button>
+    </div>
+  );
+}
+
+function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo }) {
+  const [date, setDate] = useState(todayISO());
+  const [shift, setShift] = useState("Α");
+  const [sub, setSub] = useState("temps");
+  const [editingSubTabs, setEditingSubTabs] = useState(false);
+  const [editingStations, setEditingStations] = useState(false);
+  const [editingShifts, setEditingShifts] = useState(false);
+  const [clockNow, setClockNow] = useState(new Date());
+  const [exportMonth, setExportMonth] = useState(monthKey(new Date()));
+
+  useEffect(() => {
+    const t = setInterval(() => setClockNow(new Date()), 60000);
+    return () => clearInterval(t);
+  }, []);
+
+  const activeShift = getActiveShift(clockNow);
+  const minsLeft = minutesUntilShiftEnd(clockNow);
+  const todayKey = todayISO();
+  const todayMonthKey = monthKey(clockNow);
+  const activeShiftFilled = stations
+    .filter((s) => s.type !== "dry")
+    .every((st) => {
+      const v = ccpData?.[todayMonthKey]?.[todayKey]?.[activeShift]?.[st.id];
+      return v !== undefined && v !== "" && v !== "-";
+    });
+  const showReminder = stations.filter((s) => s.type !== "dry").length > 0 && !activeShiftFilled && minsLeft <= 45;
+
+  const [wrongShiftWarning, setWrongShiftWarning] = useState(null);
+  const selectShift = (s) => {
+    setShift(s);
+    if (date === todayKey && s !== activeShift) {
+      setWrongShiftWarning(s);
+    } else {
+      setWrongShiftWarning(null);
+    }
+  };
+
+  const moveStation = (idx, dir) => {
+    const next = [...stations];
+    const j = idx + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setStations(next);
+  };
+  const renameStation = (idx, name) => {
+    const next = [...stations];
+    next[idx] = { ...next[idx], name };
+    setStations(next);
+  };
+  const setStationType = (idx, type) => {
+    const next = [...stations];
+    next[idx] = { ...next[idx], type };
+    setStations(next);
+  };
+  const removeStation = (idx) => setStations(stations.filter((_, i) => i !== idx));
+  const addStation = () => setStations([...stations, { id: uid(), name: "Νέος σταθμός", type: "fridge" }]);
+
+  const [editingDisplay, setEditingDisplay] = useState(false);
+  const moveDisplayItem = (idx, dir) => {
+    const next = [...displayItems];
+    const j = idx + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setDisplayItems(next);
+  };
+  const renameDisplayItem = (idx, name) => {
+    const next = [...displayItems];
+    next[idx] = { ...next[idx], name };
+    setDisplayItems(next);
+  };
+  const setDisplayLimit = (idx, limit) => {
+    const next = [...displayItems];
+    next[idx] = { ...next[idx], limit: limit === "" ? "" : parseFloat(limit) };
+    setDisplayItems(next);
+  };
+  const removeDisplayItem = (idx) => setDisplayItems(displayItems.filter((_, i) => i !== idx));
+  const addDisplayItem = () => setDisplayItems([...displayItems, { id: uid(), name: "Νέα βιτρίνα", limit: 7, cmp: "lt" }]);
+
+  const [editingClean, setEditingClean] = useState(false);
+  const [expandedClean, setExpandedClean] = useState({});
+  const moveCleanArea = (idx, dir) => {
+    const next = [...cleaningAreas];
+    const j = idx + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setCleaningAreas(next);
+  };
+  const removeCleanArea = (idx) => setCleaningAreas(cleaningAreas.filter((_, i) => i !== idx));
+  const addCleanArea = (areaName) => {
+    if (!areaName.trim()) return;
+    setCleaningAreas([...cleaningAreas, { id: uid(), area: areaName, items: [] }]);
+  };
+  const renameCleanArea = (idx, name) => {
+    const next = cleaningAreas.map((g, i) => (i === idx ? { ...g, area: name } : g));
+    setCleaningAreas(next);
+  };
+  const moveCleanItem = (gIdx, iIdx, dir) => {
+    const next = cleaningAreas.map((g) => ({ ...g, items: [...g.items] }));
+    const items = next[gIdx].items;
+    const j = iIdx + dir;
+    if (j < 0 || j >= items.length) return;
+    [items[iIdx], items[j]] = [items[j], items[iIdx]];
+    setCleaningAreas(next);
+  };
+  const removeCleanItem = (gIdx, iIdx) => {
+    const next = cleaningAreas.map((g, i) => (i === gIdx ? { ...g, items: g.items.filter((_, ii) => ii !== iIdx) } : g));
+    setCleaningAreas(next);
+  };
+  const addCleanItem = (gIdx, name, freq) => {
+    if (!name.trim()) return;
+    const next = cleaningAreas.map((g, i) => (i === gIdx ? { ...g, items: [...g.items, { id: uid(), name, freq: freq || "—" }] } : g));
+    setCleaningAreas(next);
+  };
+  const renameCleanItem = (gIdx, iIdx, field, val) => {
+    const next = cleaningAreas.map((g, i) => {
+      if (i !== gIdx) return g;
+      const items = g.items.map((it, ii) => (ii === iIdx ? { ...it, [field]: val } : it));
+      return { ...g, items };
+    });
+    setCleaningAreas(next);
+  };
+  const toggleCleanItemDay = (gIdx, iIdx, dayIdx) => {
+    const next = cleaningAreas.map((g, i) => {
+      if (i !== gIdx) return g;
+      const items = g.items.map((it, ii) => {
+        if (ii !== iIdx) return it;
+        const days = it.days || [];
+        const nextDays = days.includes(dayIdx) ? days.filter((d) => d !== dayIdx) : [...days, dayIdx];
+        return { ...it, days: nextDays };
+      });
+      return { ...g, items };
+    });
+    setCleaningAreas(next);
+  };
+
+  const mk = monthKey(new Date(date));
+
+  // --- temps ---
+  const dayTemps = ccpData?.[mk]?.[date]?.[shift] || {};
+  const setTemp = (stationId, val) => {
+    const next = { ...ccpData };
+    next[mk] = next[mk] || {};
+    next[mk][date] = next[mk][date] || {};
+    next[mk][date][shift] = { ...next[mk][date][shift], [stationId]: val };
+    setCcpData(next);
+  };
+
+  // --- display cases ---
+  const dayDisplay = ccpData?.[mk]?.[date]?.[shift]?._display || {};
+  const setDisplay = (id, val) => {
+    const next = { ...ccpData };
+    next[mk] = next[mk] || {};
+    next[mk][date] = next[mk][date] || {};
+    next[mk][date][shift] = next[mk][date][shift] || {};
+    next[mk][date][shift]._display = { ...next[mk][date][shift]._display, [id]: val };
+    setCcpData(next);
+  };
+
+  // --- oil ---
+  const dayOil = oilData?.[mk]?.[date] || {};
+  const setOil = (field, val) => {
+    const next = { ...oilData };
+    next[mk] = next[mk] || {};
+    next[mk][date] = { ...next[mk][date], [field]: val };
+    setOilData(next);
+  };
+
+  // --- cleaning ---
+  const dayClean = cleanData?.[mk]?.[date]?.[shift] || {};
+  const setClean = (key, val) => {
+    const next = { ...cleanData };
+    next[mk] = next[mk] || {};
+    next[mk][date] = next[mk][date] || {};
+    next[mk][date][shift] = { ...next[mk][date][shift], [key]: val };
+    setCleanData(next);
+  };
+
+  // --- διορθωτικές ενέργειες (ψυγεία) ---
+  const dayActions = ccpData?.[mk]?.[date]?.[shift]?._actions || {};
+  const setStationAction = (stationId, val) => {
+    const next = { ...ccpData };
+    next[mk] = next[mk] || {};
+    next[mk][date] = next[mk][date] || {};
+    next[mk][date][shift] = next[mk][date][shift] || {};
+    next[mk][date][shift]._actions = { ...next[mk][date][shift]._actions, [stationId]: val };
+    setCcpData(next);
+  };
+
+  // --- διορθωτικές ενέργειες (βιτρίνες) ---
+  const dayDisplayActions = ccpData?.[mk]?.[date]?.[shift]?._displayActions || {};
+  const setDisplayAction = (id, val) => {
+    const next = { ...ccpData };
+    next[mk] = next[mk] || {};
+    next[mk][date] = next[mk][date] || {};
+    next[mk][date][shift] = next[mk][date][shift] || {};
+    next[mk][date][shift]._displayActions = { ...next[mk][date][shift]._displayActions, [id]: val };
+    setCcpData(next);
+  };
+
+  const evalStation = (st, val) => {
+    if (val === "" || val === undefined || val === "-") return null;
+    const n = parseFloat(val);
+    if (Number.isNaN(n)) return null;
+    if (st.type === "freezer") return n <= -16;
+    if (st.type === "fridge") return n <= 7;
+    return true;
+  };
+
+  const subTabsBase = [
+    { id: "temps", icon: Snowflake, defaultLabel: "Ψυγεία / Κατάψυξη" },
+    { id: "clean", icon: Sparkles, defaultLabel: "Καθαριότητα" },
+    { id: "oil", icon: Droplet, defaultLabel: "Λάδι τηγανίσματος" },
+    { id: "display", icon: Thermometer, defaultLabel: "Παγωτό" },
+  ];
+  const subTabs = subTabsBase.map((t) => ({ ...t, label: subTabLabels[t.id] || t.defaultLabel }));
+
+  return (
+    <div>
+      <SectionTitle icon={ClipboardList} sub="Καθημερινή καταγραφή θερμοκρασιών, λαδιού και καθαριότητας ανά βάρδια.">
+        Ημερήσιες Καταγραφές
+      </SectionTitle>
+
+      {showReminder && (
+        <Card className="mb-4 border-2 border-amber-400 bg-amber-50">
+          <div className="flex items-start gap-2">
+            <AlertTriangle size={18} className="text-amber-600 shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <p className="text-sm font-bold text-amber-800">
+                Η βάρδια «{shiftNames[activeShift] || activeShift}» {minsLeft > 0 ? `τελειώνει σε ${minsLeft} λεπτά` : "μόλις τελείωσε"}
+              </p>
+              <p className="text-xs text-amber-700 mt-0.5">Δεν έχουν καταχωρηθεί ακόμα όλες οι θερμοκρασίες ψυγείων για σήμερα.</p>
+              <button
+                onClick={() => { setDate(todayKey); setShift(activeShift); setSub("temps"); }}
+                className="mt-2 text-xs font-semibold bg-amber-500 text-white px-3 py-1.5 rounded-lg"
+              >
+                Καταχώρηση τώρα
+              </button>
+            </div>
+          </div>
+        </Card>
+      )}
+
+      <Card className="mb-4">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Ημερομηνία">
+            <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
+          </Field>
+          <Field label="Βάρδια">
+            <div className="flex gap-2 mt-1">
+              {SHIFTS.map((s) => {
+                const lit = shift === s;
+                return (
+                  <button
+                    key={s}
+                    onClick={() => selectShift(s)}
+                    className={`flex-1 py-2 rounded-lg text-xs font-bold border-2 transition-all ${
+                      lit
+                        ? "bg-amber-400 border-amber-500 text-slate-900 shadow-[0_0_0_3px_rgba(251,191,36,0.35)]"
+                        : "border-slate-300 text-slate-500 bg-white"
+                    }`}
+                  >{shiftNames[s] || s}</button>
+                );
+              })}
+            </div>
+          </Field>
+        </div>
+        {wrongShiftWarning && wrongShiftWarning === shift && (
+          <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2 flex items-center gap-1.5">
+            <AlertTriangle size={12} className="shrink-0" />
+            Αυτή τη στιγμή σε εξέλιξη είναι η βάρδια «{shiftNames[activeShift] || activeShift}» — βεβαιώσου ότι θες να καταχωρήσεις σε άλλη βάρδια.
+          </p>
+        )}
+        <button onClick={() => setEditingShifts((v) => !v)} className="text-[11px] text-teal-700 underline mt-1">
+          {editingShifts ? "Κλείσιμο" : "Μετονομασία βαρδιών"}
+        </button>
+        {editingShifts && (
+          <div className="grid grid-cols-3 gap-2 mt-2">
+            {SHIFTS.map((s) => (
+              <input
+                key={s}
+                className="border border-slate-300 rounded-lg px-2 py-1 text-xs"
+                value={shiftNames[s] || ""}
+                onChange={(e) => setShiftNames({ ...shiftNames, [s]: e.target.value })}
+              />
+            ))}
+          </div>
+        )}
+      </Card>
+
+      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+        {subTabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setSub(t.id)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border ${
+              sub === t.id ? "bg-slate-800 text-white border-slate-800" : "border-slate-300 text-slate-600"
+            }`}
+          >
+            <t.icon size={13} /> {t.label}
+          </button>
+        ))}
+      </div>
+
+      {sub === "temps" && (
+        <Card>
+          <div className="mb-3 inline-flex items-center gap-1.5 bg-slate-800 text-white text-xs font-bold px-3 py-1.5 rounded-lg">
+            <Thermometer size={13} /> Ψυγεία ≤ 7°C &nbsp;·&nbsp; Κατάψυξη ≤ -16°C
+          </div>
+
+          {!editingStations && (
+            <div className="space-y-2">
+              {stations.map((st) => {
+                const val = dayTemps[st.id] ?? "";
+                const ok = evalStation(st, val);
+                const outOfRange = val !== "" && val !== "-" && ok === false;
+                return (
+                  <div key={st.id} className="border-b border-slate-100 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm text-slate-700 flex items-center gap-1.5">
+                        {st.type !== "dry" && <Snowflake size={13} className={st.type === "freezer" ? "text-sky-500" : "text-teal-500"} />}
+                        {st.name}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {st.type !== "dry" && (
+                          <>
+                            <TempInput value={val} onChange={(v) => setTemp(st.id, v)} />
+                            {val !== "" && val !== "-" && <Stamp ok={ok} />}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {outOfRange && (
+                      <CorrectiveActionPanel value={dayActions[st.id]} onChange={(v) => setStationAction(st.id, v)} />
+                    )}
+                  </div>
+                );
+              })}
+              <button
+                onClick={() => setEditingStations(true)}
+                className="text-[11px] text-slate-400 underline pt-1"
+              >
+                Επεξεργασία λίστας σταθμών
+              </button>
+            </div>
+          )}
+
+          {editingStations && (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500 mb-1">Με τα βελάκια αλλάζεις τη σειρά. Πάτα στο όνομα για να το αλλάξεις.</p>
+              {stations.map((st, idx) => (
+                <div key={st.id} className="border border-slate-200 rounded-lg p-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col">
+                      <button onClick={() => moveStation(idx, -1)} disabled={idx === 0}
+                        className="w-7 h-6 flex items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-30">▲</button>
+                      <button onClick={() => moveStation(idx, 1)} disabled={idx === stations.length - 1}
+                        className="w-7 h-6 flex items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-30 mt-0.5">▼</button>
+                    </div>
+                    <input
+                      className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                      value={st.name}
+                      onChange={(e) => renameStation(idx, e.target.value)}
+                    />
+                    <button onClick={() => removeStation(idx)} className="w-8 h-8 shrink-0 rounded-lg border border-red-200 text-red-600 flex items-center justify-center">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="flex gap-1.5 pl-9">
+                    {[["fridge", "Ψυγείο (≤7°C)"], ["freezer", "Κατάψυξη (≤-16°C)"], ["dry", "Χωρίς θερμοκρασία"]].map(([val, label]) => (
+                      <button
+                        key={val}
+                        onClick={() => setStationType(idx, val)}
+                        className={`text-[10px] px-2 py-1 rounded-full border ${st.type === val ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-500"}`}
+                      >{label}</button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <button onClick={addStation} className="w-full flex items-center justify-center gap-1.5 border-2 border-dashed border-slate-300 text-slate-500 rounded-lg py-2 text-sm font-semibold">
+                <Plus size={15} /> Προσθήκη σταθμού
+              </button>
+              <button onClick={() => setEditingStations(false)} className="w-full bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold">
+                Τέλος επεξεργασίας
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {sub === "display" && (
+        <Card>
+          {!editingDisplay && (
+            <div className="space-y-2">
+              {displayItems.map((d) => {
+                const val = dayDisplay[d.id] ?? "";
+                const ok = val === "" || val === "-" ? null : parseFloat(val) <= d.limit;
+                const outOfRange = val !== "" && val !== "-" && ok === false;
+                return (
+                  <div key={d.id} className="border-b border-slate-100 pb-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm text-slate-700">{d.name}<LimitBadge>&lt;{d.limit}°C</LimitBadge></span>
+                      <div className="flex items-center gap-2">
+                        <TempInput value={val} onChange={(v) => setDisplay(d.id, v)} />
+                        {val !== "" && val !== "-" && <Stamp ok={ok} />}
+                      </div>
+                    </div>
+                    {outOfRange && (
+                      <CorrectiveActionPanel value={dayDisplayActions[d.id]} onChange={(v) => setDisplayAction(d.id, v)} />
+                    )}
+                  </div>
+                );
+              })}
+              <p className="text-xs text-amber-600 pt-1 flex items-start gap-1">
+                <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                Απόρριψη προϊόντων εκτός ορίων εάν δεν καταναλωθούν εντός 4 ωρών.
+              </p>
+              <button onClick={() => setEditingDisplay(true)} className="text-[11px] text-slate-400 underline pt-1">
+                Επεξεργασία λίστας βιτρινών
+              </button>
+            </div>
+          )}
+
+          {editingDisplay && (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500 mb-1">Με τα βελάκια αλλάζεις τη σειρά. Πάτα στο όνομα ή στο όριο για να τα αλλάξεις.</p>
+              {displayItems.map((d, idx) => (
+                <div key={d.id} className="border border-slate-200 rounded-lg p-2 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="flex flex-col">
+                      <button onClick={() => moveDisplayItem(idx, -1)} disabled={idx === 0}
+                        className="w-7 h-6 flex items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-30">▲</button>
+                      <button onClick={() => moveDisplayItem(idx, 1)} disabled={idx === displayItems.length - 1}
+                        className="w-7 h-6 flex items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-30 mt-0.5">▼</button>
+                    </div>
+                    <input
+                      className="flex-1 border border-slate-300 rounded-lg px-2 py-1.5 text-sm"
+                      value={d.name}
+                      onChange={(e) => renameDisplayItem(idx, e.target.value)}
+                    />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <span className="text-[10px] text-slate-400">&lt;</span>
+                      <input
+                        type="number" step="0.5"
+                        className="w-14 border border-slate-300 rounded-lg px-1.5 py-1.5 text-sm"
+                        value={d.limit}
+                        onChange={(e) => setDisplayLimit(idx, e.target.value)}
+                      />
+                      <span className="text-[10px] text-slate-400">°C</span>
+                    </div>
+                    <button onClick={() => removeDisplayItem(idx)} className="w-8 h-8 shrink-0 rounded-lg border border-red-200 text-red-600 flex items-center justify-center">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              <button onClick={addDisplayItem} className="w-full flex items-center justify-center gap-1.5 border-2 border-dashed border-slate-300 text-slate-500 rounded-lg py-2 text-sm font-semibold">
+                <Plus size={15} /> Προσθήκη βιτρίνας
+              </button>
+              <button onClick={() => setEditingDisplay(false)} className="w-full bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold">
+                Τέλος επεξεργασίας
+              </button>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {sub === "oil" && (
+        <Card>
+          <Field label="Θερμοκρασία λαδιού">
+            <LimitBadge>&lt;179°C</LimitBadge>
+            <div className="flex items-center gap-2 mt-2">
+              <TempInput value={dayOil.temp ?? ""} onChange={(v) => setOil("temp", v)} />
+              {dayOil.temp !== undefined && dayOil.temp !== "" && dayOil.temp !== "-" && <Stamp ok={parseFloat(dayOil.temp) < 179} />}
+            </div>
+          </Field>
+          {dayOil.temp !== undefined && dayOil.temp !== "" && dayOil.temp !== "-" && parseFloat(dayOil.temp) >= 179 && (
+            <CorrectiveActionPanel value={dayOil._action} onChange={(v) => setOil("_action", v)} actions={OIL_CORRECTIVE_ACTIONS} />
+          )}
+          {[
+            ["appearance", "Εμφάνιση λαδιού φυσιολογική"],
+            ["colorSmell", "Χρώμα – οσμή – γεύση φυσιολογικά"],
+            ["filtered", "Έγινε φιλτράρισμα"],
+          ].map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 mb-2 text-sm text-slate-700">
+              <input type="checkbox" checked={!!dayOil[key]} onChange={(e) => setOil(key, e.target.checked)} className="w-4 h-4 accent-teal-700" />
+              {label}
+            </label>
+          ))}
+          <label className="flex items-center gap-2 mt-3 text-sm font-semibold text-slate-800">
+            <input type="checkbox" checked={!!dayOil.changed} onChange={(e) => setOil("changed", e.target.checked)} className="w-4 h-4 accent-teal-700" />
+            <Flame size={14} className="text-orange-500" /> Έγινε αλλαγή λαδιού σήμερα (κανονικά Τρί / Πέμ / Κυρ)
+          </label>
+        </Card>
+      )}
+
+
+      {sub === "clean" && (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <button onClick={() => setEditingClean((v) => !v)} className="text-[11px] text-slate-400 underline">
+              {editingClean ? "Τέλος επεξεργασίας" : "Επεξεργασία λίστας καθαριότητας"}
+            </button>
+          </div>
+
+          {!editingClean && cleaningAreas.map((group) => {
+            const visibleItems = group.items.filter((item) => shouldShowCleanItem(item, cleanData, group.id, date));
+            if (visibleItems.length === 0) return null;
+            const todayShifts = cleanData?.[mk]?.[date] || {};
+            return (
+              <Card key={group.id}>
+                <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mb-2">{group.area}</p>
+                <div className="space-y-1.5">
+                  {visibleItems.map((item) => {
+                    const key = `${group.id}__${item.id}`;
+                    const val = dayClean[key] || "";
+                    const scheduled = item.days && item.days.length > 0;
+                    const otherShiftDone = scheduled && !val
+                      ? SHIFTS.find((s) => s !== shift && todayShifts?.[s]?.[key])
+                      : null;
+                    const expanded = expandedClean[key];
+
+                    if (otherShiftDone && !expanded) {
+                      return (
+                        <div key={key} className="flex items-center justify-between text-xs gap-2 py-0.5 opacity-70">
+                          <span className="text-slate-500">{item.name} — ✓ έγινε ({shiftNames[otherShiftDone] || otherShiftDone})</span>
+                          <button
+                            onClick={() => setExpandedClean({ ...expandedClean, [key]: true })}
+                            className="text-teal-700 underline shrink-0"
+                          >Ξαναμαρκάρισμα</button>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div key={key} className="flex items-center justify-between text-sm gap-2">
+                        <div>
+                          <p className="text-slate-700">{item.name}</p>
+                          <p className="text-[10px] text-slate-400">{item.freq}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          {[["✓", "teal"], ["Χ", "red"], ["*", "amber"]].map(([mark, color]) => (
+                            <button
+                              key={mark}
+                              onClick={() => setClean(key, val === mark ? "" : mark)}
+                              className={`w-8 h-8 rounded-lg border-2 font-bold text-sm
+                                ${val === mark
+                                  ? color === "teal" ? "bg-teal-700 border-teal-700 text-white"
+                                  : color === "red" ? "bg-red-600 border-red-600 text-white"
+                                  : "bg-amber-500 border-amber-500 text-white"
+                                  : "border-slate-300 text-slate-500"}`}
+                            >{mark}</button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            );
+          })}
+          {!editingClean && (
+            <p className="text-xs text-slate-500">✓ έγινε έλεγχος και είναι καθαρά · Χ εντοπίστηκε πρόβλημα · * έγινε καθαριότητα</p>
+          )}
+
+          {editingClean && (
+            <>
+              <p className="text-[11px] text-slate-500">
+                Πάτα πάνω σε τίτλο ή όνομα σημείου για να το αλλάξεις. Με τα βελάκια αλλάζεις σειρά. Επίλεξε ημέρες αν θες το σημείο να εμφανίζεται μόνο συγκεκριμένες μέρες (αν δεν καθαριστεί, συνεχίζει να εμφανίζεται τις επόμενες μέρες μέχρι να γίνει) — χωρίς επιλογή, εμφανίζεται κάθε μέρα όπως τώρα.
+              </p>
+              {cleaningAreas.map((group, gIdx) => (
+                <Card key={group.id}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="flex flex-col">
+                      <button onClick={() => moveCleanArea(gIdx, -1)} disabled={gIdx === 0}
+                        className="w-7 h-6 flex items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-30">▲</button>
+                      <button onClick={() => moveCleanArea(gIdx, 1)} disabled={gIdx === cleaningAreas.length - 1}
+                        className="w-7 h-6 flex items-center justify-center rounded border border-slate-300 text-slate-500 disabled:opacity-30 mt-0.5">▼</button>
+                    </div>
+                    <input
+                      value={group.area}
+                      onChange={(e) => renameCleanArea(gIdx, e.target.value)}
+                      className="text-xs font-bold uppercase tracking-wide text-teal-800 flex-1 bg-transparent border-b border-dashed border-teal-300 focus:outline-none focus:border-teal-600 py-0.5"
+                    />
+                    <button onClick={() => removeCleanArea(gIdx)} className="w-8 h-8 shrink-0 rounded-lg border border-red-200 text-red-600 flex items-center justify-center">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="space-y-1.5 pl-9">
+                    {group.items.map((item, iIdx) => (
+                      <div key={item.id} className="border-b border-slate-100 pb-1.5 mb-1">
+                        <div className="flex items-center gap-2 text-xs">
+                          <div className="flex flex-col">
+                            <button onClick={() => moveCleanItem(gIdx, iIdx, -1)} disabled={iIdx === 0}
+                              className="w-6 h-5 flex items-center justify-center rounded border border-slate-300 text-slate-400 disabled:opacity-30 text-[10px]">▲</button>
+                            <button onClick={() => moveCleanItem(gIdx, iIdx, 1)} disabled={iIdx === group.items.length - 1}
+                              className="w-6 h-5 flex items-center justify-center rounded border border-slate-300 text-slate-400 disabled:opacity-30 mt-0.5 text-[10px]">▼</button>
+                          </div>
+                          <input
+                            value={item.name}
+                            onChange={(e) => renameCleanItem(gIdx, iIdx, "name", e.target.value)}
+                            className="flex-1 text-slate-600 bg-transparent border-b border-dashed border-slate-300 focus:outline-none focus:border-teal-500 py-0.5"
+                          />
+                          <input
+                            value={item.freq}
+                            onChange={(e) => renameCleanItem(gIdx, iIdx, "freq", e.target.value)}
+                            className="w-20 text-slate-400 bg-transparent border-b border-dashed border-slate-300 focus:outline-none focus:border-teal-500 py-0.5 text-[10px]"
+                          />
+                          <button onClick={() => removeCleanItem(gIdx, iIdx)} className="w-6 h-6 shrink-0 rounded border border-red-200 text-red-600 flex items-center justify-center">
+                            <Trash2 size={11} />
+                          </button>
+                        </div>
+                        <div className="flex gap-1 pl-9 mt-1">
+                          {WEEKDAYS.map((wd) => {
+                            const active = (item.days || []).includes(wd.idx);
+                            return (
+                              <button
+                                key={wd.idx}
+                                onClick={() => toggleCleanItemDay(gIdx, iIdx, wd.idx)}
+                                className={`text-[9px] w-6 h-6 rounded-full border font-semibold ${
+                                  active ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-400"
+                                }`}
+                              >{wd.label}</button>
+                            );
+                          })}
+                          <span className="text-[9px] text-slate-400 self-center ml-1">
+                            {(item.days || []).length === 0 ? "κάθε μέρα" : "επιλεγμένες μέρες"}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                    <NewCleanItemForm onAdd={(name, freq) => addCleanItem(gIdx, name, freq)} />
+                  </div>
+                </Card>
+              ))}
+              <NewCleanAreaForm onAdd={addCleanArea} />
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="flex flex-col items-center gap-2 mt-8 pt-3 border-t border-slate-200">
+        <div className="flex items-center gap-2">
+          <input
+            type="month"
+            value={exportMonth}
+            onChange={(e) => setExportMonth(e.target.value)}
+            className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-500"
+          />
+          <button
+            onClick={() => requestPrint(<MonthlyFullPrintSheet mk={exportMonth} stations={stations} displayItems={displayItems} cleaningAreas={cleaningAreas} ccpData={ccpData} cleanData={cleanData} oilData={oilData} shiftNames={shiftNames} businessInfo={businessInfo} />)}
+            className="text-xs text-slate-500 underline"
+          >Εξαγωγή μήνα σε PDF</button>
+        </div>
+
+        <button onClick={() => setEditingSubTabs((v) => !v)} className="text-[11px] text-slate-400 underline mt-2">
+          {editingSubTabs ? "Κλείσιμο" : "Μετονομασία καρτελών"}
+        </button>
+        {editingSubTabs && (
+          <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
+            {subTabsBase.map((t) => (
+              <input
+                key={t.id}
+                value={subTabLabels[t.id] || t.defaultLabel}
+                onChange={(e) => setSubTabLabels({ ...subTabLabels, [t.id]: e.target.value })}
+                className="border border-slate-300 rounded-lg px-2 py-1 text-xs"
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: ΔΙΑΓΡΑΜΜΑ ΡΟΗΣ HACCP
+   ============================================================ */
+function HaccpFlowTab({ businessInfo }) {
+  const Box = ({ children, className = "" }) => (
+    <div className={`bg-white border-2 border-slate-800 rounded-lg px-3 py-2.5 text-center shadow-sm ${className}`}>
+      {children}
+    </div>
+  );
+  const StepLabel = ({ code, title }) => (
+    <p className="text-xs font-extrabold text-slate-800">
+      <span className="text-teal-700">{code}</span> {title}
+    </p>
+  );
+  const Items = ({ children }) => (
+    <p className="text-[10px] text-slate-500 mt-1 leading-snug">{children}</p>
+  );
+  const Arrow = () => <ArrowDown size={16} className="text-slate-400 my-0.5" />;
+
+  return (
+    <div>
+      <ScreenLetterhead info={businessInfo} />
+      <SectionTitle icon={GitBranch} sub="Διάγραμμα ροής διεργασίας παραγωγής και διάθεσης — προσαρμοσμένο στη δική σας επιχείρηση.">
+        Διάγραμμα Ροής Υγειονομικού Ενδιαφέροντος
+      </SectionTitle>
+
+      <Card>
+        <div className="flex flex-col items-center gap-0 w-full">
+
+          <Box className="w-full">
+            <StepLabel code="(1) OPRP1" title="ΠΡΟΜΗΘΕΙΑ" />
+            <Items>Αλλαντικά, τυριά, dressing-σάλτσες, συσκ. λαχανικά, σφολιατικά, αρτοσκευάσματα, θερμικώς επεξεργασμένα ΚΤΨ προϊόντα (π.χ. μπιφτέκι, κοτόπουλο, ομελέτα), καπν. σολομός, κρουασάν, μπακαλική, αναψυκτικά, χυμοί, μανάβικη, γλυκά, συσκ. παγωτά, γαλακτομικά, κονσερβοποιημένα προϊόντα, ξηροί καρποί, προτηγανισμένες πατάτες, λάδι, ροφήματα, μπαχαρικά, συσκευασμένα S/W, σαντιγί, αυγά βρασμένα &amp; καθαρισμένα, παστ. αυγό, ζελέ, μαργαρίνη, παγάκια, χυλός κρέπας</Items>
+          </Box>
+          <Arrow />
+
+          <Box className="w-full border-teal-700">
+            <StepLabel code="(2) CCP1" title="ΠΑΡΑΛΑΒΗ" />
+            <Items>Όλα του (1) παραλαμβάνονται από την κεντρική είσοδο του καταστήματος</Items>
+          </Box>
+          <Arrow />
+
+          <Box className="w-full border-teal-700">
+            <StepLabel code="(3) CCP2" title="ΑΠΟΘΗΚΕΥΣΗ" />
+          </Box>
+          <div className="grid grid-cols-1 gap-2 w-full mt-2 mb-1">
+            <div className="border border-teal-200 bg-teal-50 rounded-lg p-2">
+              <p className="text-[11px] font-bold text-teal-800">2α · ΣΕ ΨΥΞΗ <LimitBadge>5°C</LimitBadge></p>
+              <p className="text-[10px] text-teal-700 mt-0.5">Αλλαντικά, τυριά, dressing, συσκευασμένα S/W, συσκευασμένα λαχανικά, γαλακτομικά, μανάβικη, αυγό βραστό, αυγό παστ., αρτίδια, ζελέ, αραβική πίτα</p>
+            </div>
+            <div className="border border-sky-200 bg-sky-50 rounded-lg p-2">
+              <p className="text-[11px] font-bold text-sky-800">2β · ΣΕ ΚΑΤΑΨΥΞΗ <LimitBadge>-18°C</LimitBadge></p>
+              <p className="text-[10px] text-sky-700 mt-0.5">Σφολιατικά, αρτίδια, αρτοσκευάσματα, θερμικώς επεξεργασμένα ΚΤΨ προϊόντα, καπν. σολομός, κρουασάν, γλυκά, παγωτά, πατάτες, χυλός κρέπας</p>
+            </div>
+            <div className="border border-slate-200 bg-slate-50 rounded-lg p-2">
+              <p className="text-[11px] font-bold text-slate-700">2γ · ΣΤΟ ΠΕΡΙΒΑΛΛΟΝ</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">Μπακαλική, αναψυκτικά, χυμοί, ποτά, κονσερβοποιημένα προϊόντα, ξηροί καρποί, λάδι, ροφήματα, μπαχαρικά, σκόνη παγωτού soft &amp; frozen yogurt</p>
+            </div>
+          </div>
+          <Arrow />
+
+          <Box className="w-full border-teal-700">
+            <StepLabel code="(4) CCP3" title={<>ΑΠΟΨΥΞΗ <LimitBadge>5°C</LimitBadge></>} />
+            <Items>Θερμικώς επεξεργασμένα ΚΤΨ προϊόντα, καπν. σολομός, σφολιατικά, κρουασάν, αρτοσκευάσματα, γλυκά</Items>
+          </Box>
+          <Arrow />
+
+          <Box className="w-full">
+            <StepLabel code="(5) OPRP2" title="ΠΡΟΕΤΟΙΜΑΣΙΑ" />
+            <Items>Σφολιατικά, πίτσα, θερμικώς επεξεργασμένα ΚΤΨ προϊόντα, S/W, λαχανικά, γλυκά</Items>
+          </Box>
+          <div className="flex flex-wrap justify-center gap-1.5 w-full mt-2">
+            {["Πλύσιμο", "Καθαρισμός", "Αποφλοίωση", "Τεμαχισμός", "Ανάμιξη"].map((x) => (
+              <span key={x} className="text-[10px] font-semibold text-slate-600 border border-slate-300 rounded-full px-2 py-1">{x}</span>
+            ))}
+          </div>
+          <Arrow />
+
+          <div className="grid grid-cols-2 gap-2 w-full">
+            <Box className="border-teal-700">
+              <StepLabel code="(6) CCP4" title={<>ΘΕΡΜΙΚΗ ΕΠΕΞΕΡΓΑΣΙΑ <LimitBadge>≥75°C</LimitBadge></>} />
+              <Items>Σφολιατικά, πίτσα, αρτοσκευάσματα</Items>
+            </Box>
+            <Box>
+              <StepLabel code="(7) OPRP3" title="ΤΗΓΑΝΙΣΜΑ" />
+              <Items>Πατάτες</Items>
+            </Box>
+          </div>
+          <Arrow />
+
+          <Box className="w-full">
+            <StepLabel code="(8)" title="ΕΚΘΕΣΗ ΠΕΡΙΒΑΛΛΟΝ" />
+            <Items>Αρτοσκευάσματα</Items>
+          </Box>
+          <Arrow />
+
+          <div className="grid grid-cols-1 gap-2 w-full">
+            <Box className="border-amber-500 bg-amber-50">
+              <StepLabel code="(9) CCP5" title={<>ΕΚΘΕΣΗ ΜΕ ΘΕΡΜΑΝΣΗ <LimitBadge>≥60°C, ≤4ω</LimitBadge></>} />
+              <Items>Σφολιατικά, πίτσα, κρουασάν · Επαναθέρμανση: σφολιατικά, θερμικώς επεξεργασμένα ΚΤΨ προϊόντα</Items>
+            </Box>
+            <Box className="border-sky-500 bg-sky-50">
+              <StepLabel code="(10) CCP6" title={<>ΕΚΘΕΣΗ ΜΕ ΨΥΞΗ <LimitBadge>≤7°C, ≤4ω</LimitBadge></>} />
+              <Items>Σαλάτες, S/W, γλυκά</Items>
+            </Box>
+          </div>
+          <Arrow />
+
+          <Box className="w-full bg-slate-800 border-slate-800">
+            <p className="text-sm font-extrabold text-white">(11) ΣΕΡΒΙΡΙΣΜΑ</p>
+          </Box>
+        </div>
+      </Card>
+
+      <Card className="mt-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mb-2 flex items-center gap-1.5">
+          <ShieldCheck size={14} /> Νομικό πλαίσιο
+        </p>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Υ.Δ. Υ1γ/Γ.Π/οικ.96967/2012 &amp; Υ1γ/Γ.Π/οικ.47829/2017 (Υγειονομικοί όροι λειτουργίας επιχειρήσεων τροφίμων/ποτών) και
+          Καν. (ΕΚ) 852/2004: υποχρέωση εφαρμογής αρχών HACCP και καθημερινής καταγραφής θερμοκρασιών. Πρόστιμα ελλιπούς τεκμηρίωσης από 1.500€.
+        </p>
+      </Card>
+    </div>
+  );
+}
+
+/* ============================================================
+   TAB: ΑΡΧΕΙΟΘΕΤΗΣΗ / ΚΑΤΑΣΤΡΟΦΗ ΕΝΤΥΠΩΝ
+   ============================================================ */
+function BackupPanel({ getBackupText, onImport }) {
+  const [mode, setMode] = useState(null); // "export" | "import"
+  const [exportText, setExportText] = useState("");
+  const [importText, setImportText] = useState("");
+  const [status, setStatus] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const openExport = () => {
+    setExportText(getBackupText());
+    setMode("export");
+    setStatus(null);
+    setCopied(false);
+  };
+
+  const copyExport = async () => {
+    try {
+      await navigator.clipboard.writeText(exportText);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+      setStatus({ ok: false, msg: "Η αυτόματη αντιγραφή απέτυχε — επίλεξε το κείμενο με το χέρι και αντέγραψέ το." });
+    }
+  };
+
+  const applyImport = () => {
+    try {
+      const data = JSON.parse(importText);
+      onImport(data);
+      setStatus({ ok: true, msg: "Τα δεδομένα επαναφέρθηκαν επιτυχώς." });
+      setMode(null);
+      setImportText("");
+    } catch (err) {
+      setStatus({ ok: false, msg: "Το κείμενο δεν αναγνωρίστηκε ως έγκυρο αντίγραφο ασφαλείας." });
+    }
+  };
+
+  return (
+    <Card className="mb-4 border-2 border-slate-800">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
+        <Save size={14} /> Αντίγραφο Ασφαλείας
+      </p>
+      <p className="text-xs text-slate-500 mb-3">
+        Αντέγραψε όλα τα δεδομένα σε κείμενο και φύλαξέ τα κάπου (σημειώσεις, email). Αν χρειαστεί αναβάθμιση, επικόλλησέ τα πίσω για να επανέλθουν όλα.
+      </p>
+      {!mode && (
+        <div className="flex flex-wrap gap-2">
+          <button onClick={openExport} className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-white font-semibold flex items-center gap-1.5">
+            <Archive size={13} /> Εξαγωγή (αντιγραφή κειμένου)
+          </button>
+          <button onClick={() => { setMode("import"); setStatus(null); }} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 font-semibold flex items-center gap-1.5">
+            <Plus size={13} /> Εισαγωγή (επικόλληση κειμένου)
+          </button>
+        </div>
+      )}
+
+      {mode === "export" && (
+        <div>
+          <textarea readOnly value={exportText} rows={5} className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-[10px] font-mono" onFocus={(e) => e.target.select()} />
+          <div className="flex gap-2 mt-2">
+            <button onClick={copyExport} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold">{copied ? "Αντιγράφηκε ✓" : "Αντιγραφή"}</button>
+            <button onClick={() => setMode(null)} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300">Κλείσιμο</button>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">Αν το κουμπί δεν δουλέψει, πάτα μέσα στο κείμενο (επιλέγεται αυτόματα) και αντέγραψε με το χέρι.</p>
+        </div>
+      )}
+
+      {mode === "import" && (
+        <div>
+          <textarea
+            value={importText}
+            onChange={(e) => setImportText(e.target.value)}
+            rows={5}
+            placeholder="Επικόλλησε εδώ το κείμενο αντιγράφου ασφαλείας…"
+            className="w-full border border-slate-300 rounded-lg px-2 py-1.5 text-[10px] font-mono"
+          />
+          <div className="flex gap-2 mt-2">
+            <button onClick={applyImport} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold">Εφαρμογή</button>
+            <button onClick={() => { setMode(null); setImportText(""); }} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300">Άκυρο</button>
+          </div>
+        </div>
+      )}
+      {status && (
+        <p className={`text-xs mt-2 font-semibold ${status.ok ? "text-teal-700" : "text-red-600"}`}>{status.msg}</p>
+      )}
+    </Card>
+  );
+}
+
+function BusinessInfoPanel({ info, setInfo }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(info);
+
+  const save = () => { setInfo(draft); setEditing(false); };
+
+  return (
+    <Card className="mb-4 border-2 border-orange-500">
+      <p className="text-xs font-bold uppercase tracking-wide text-orange-700 mb-2">Στοιχεία Επιχείρησης</p>
+      {!editing ? (
+        <>
+          <ScreenLetterhead info={info} />
+          <button onClick={() => { setDraft(info); setEditing(true); }} className="text-[11px] text-teal-700 underline">
+            Επεξεργασία στοιχείων
+          </button>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <Field label="Τίτλος / Επωνυμία (λογότυπο)">
+            <input className={inputCls} value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} />
+          </Field>
+          <Field label="Νομική επωνυμία">
+            <input className={inputCls} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+          </Field>
+          <Field label="ΑΦΜ">
+            <input className={inputCls} value={draft.afm} onChange={(e) => setDraft({ ...draft, afm: e.target.value })} />
+          </Field>
+          <Field label="Τύπος επιχείρησης">
+            <input className={inputCls} value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value })} />
+          </Field>
+          <Field label="Διεύθυνση">
+            <input className={inputCls} value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
+          </Field>
+          <div className="flex gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
+            <button onClick={() => setEditing(false)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+const TECHNICIAN_ACTIONS = [
+  "Επισκευή",
+  "Αντικατάσταση ανταλλακτικού",
+  "Αλλαγή συσκευής/εξοπλισμού",
+  "Καθαρισμός / Συντήρηση",
+  "Ρύθμιση θερμοστάτη",
+  "Δεν εντοπίστηκε βλάβη",
+  "Χρειάζεται παρακολούθηση / επανέλεγχος",
+];
+
+function TechnicianVisitsPanel({ visits, setVisits }) {
+  const [form, setForm] = useState(null);
+  const startNew = () => setForm({
+    id: uid(), date: todayISO(), time: "", equipment: "", found: "",
+    doneOptions: [], doneNote: "", technician: "", cost: "", nextVisit: "",
+  });
+  const save = () => {
+    if (!form.equipment.trim()) return;
+    const exists = visits.some((v) => v.id === form.id);
+    setVisits(exists ? visits.map((v) => (v.id === form.id ? form : v)) : [form, ...visits]);
+    setForm(null);
+  };
+  const remove = (id) => setVisits(visits.filter((v) => v.id !== id));
+  const toggleAction = (opt) => {
+    setForm((f) => ({
+      ...f,
+      doneOptions: f.doneOptions.includes(opt) ? f.doneOptions.filter((x) => x !== opt) : [...f.doneOptions, opt],
+    }));
+  };
+
+  return (
+    <Card className="mb-4">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
+        <ClipboardList size={14} /> Επισκέψεις Τεχνικού
+      </p>
+      <p className="text-xs text-slate-500 mb-3">Καταγραφή επισκέψεων τεχνικού για βλάβες ψυγείων/εξοπλισμού.</p>
+
+      {!form && (
+        <button onClick={startNew} className="mb-3 flex items-center gap-1.5 bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+          <Plus size={16} /> Νέα επίσκεψη
+        </button>
+      )}
+      {form && (
+        <div className="space-y-2 mb-3">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ημερομηνία">
+              <input type="date" className={inputCls} value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+            </Field>
+            <Field label="Ώρα (προαιρετικό)">
+              <input type="time" className={inputCls} value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Εξοπλισμός / Βλάβη">
+            <input className={inputCls} placeholder="π.χ. Ψυγείο 3 (κουζίνα coca) — δεν κρατούσε θερμοκρασία" value={form.equipment} onChange={(e) => setForm({ ...form, equipment: e.target.value })} />
+          </Field>
+          <Field label="Τι βρήκε ο τεχνικός">
+            <textarea rows={2} className={inputCls} value={form.found} onChange={(e) => setForm({ ...form, found: e.target.value })} />
+          </Field>
+          <Field label="Τι έκανε">
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {TECHNICIAN_ACTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => toggleAction(opt)}
+                  className={`text-[11px] px-2.5 py-1 rounded-full border font-semibold ${
+                    form.doneOptions.includes(opt) ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-500"
+                  }`}
+                >{opt}</button>
+              ))}
+            </div>
+            <input
+              placeholder="Άλλη σημείωση (προαιρετικό)…"
+              className={inputCls}
+              value={form.doneNote}
+              onChange={(e) => setForm({ ...form, doneNote: e.target.value })}
+            />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Κόστος (προαιρετικό)">
+              <input className={inputCls} placeholder="€" value={form.cost} onChange={(e) => setForm({ ...form, cost: e.target.value })} />
+            </Field>
+            <Field label="Επόμενη συντήρηση (προαιρετικό)">
+              <input type="date" className={inputCls} value={form.nextVisit} onChange={(e) => setForm({ ...form, nextVisit: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Όνομα τεχνικού / εταιρείας">
+            <input className={inputCls} value={form.technician} onChange={(e) => setForm({ ...form, technician: e.target.value })} />
+          </Field>
+          <div className="flex gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
+            <button onClick={() => setForm(null)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {visits.map((v) => (
+          <div key={v.id} className="border border-slate-100 rounded-lg p-2.5 flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-slate-800">{v.equipment}</p>
+              <p className="text-xs text-slate-500">{v.date}{v.time && ` · ${v.time}`} · {v.technician || "—"}</p>
+              {v.found && <p className="text-xs text-slate-500 mt-0.5">Βρήκε: {v.found}</p>}
+              {(v.doneOptions?.length > 0 || v.doneNote) && (
+                <p className="text-xs text-slate-500">Έκανε: {[...(v.doneOptions || []), v.doneNote].filter(Boolean).join(" · ")}</p>
+              )}
+              {(v.cost || v.nextVisit) && (
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {v.cost && `Κόστος: ${v.cost}€`}{v.cost && v.nextVisit && " · "}{v.nextVisit && `Επόμενη: ${v.nextVisit}`}
+                </p>
+              )}
+            </div>
+            <div className="flex gap-1 shrink-0">
+              <button onClick={() => setForm({ time: "", doneOptions: [], doneNote: v.done || "", cost: "", nextVisit: "", ...v })} className="text-xs px-2 py-1 border border-slate-300 rounded-lg">Επεξ.</button>
+              <button onClick={() => remove(v.id)} className="text-xs px-2 py-1 border border-red-200 text-red-600 rounded-lg"><Trash2 size={12} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+const RETENTION_MONTHS = 24;
+
+function monthsAgo(mk) {
+  const [y, m] = mk.split("-").map(Number);
+  const now = new Date();
+  return (now.getFullYear() - y) * 12 + (now.getMonth() + 1 - m);
+}
+
+function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, records, setRecords }) {
+  const months = [...new Set([...Object.keys(ccpData || {}), ...Object.keys(cleanData || {}), ...Object.keys(oilData || {})])].sort();
+  const [confirming, setConfirming] = useState(null);
+  const [responsible, setResponsible] = useState("");
+
+  const deleteMonth = (mk) => {
+    const next1 = { ...ccpData }; delete next1[mk]; setCcpData(next1);
+    const next2 = { ...cleanData }; delete next2[mk]; setCleanData(next2);
+    const next3 = { ...oilData }; delete next3[mk]; setOilData(next3);
+    const [y, m] = mk.split("-");
+    const lastDay = new Date(Number(y), Number(m), 0).getDate();
+    setRecords([{
+      id: uid(), code: `Καταγραφές ποιότητας ${mk}`,
+      from: `${mk}-01`, to: `${mk}-${String(lastDay).padStart(2, "0")}`,
+      destroyDate: todayISO(), responsible,
+      notes: `Αυτόματη διαγραφή μετά την παρέλευση ${RETENTION_MONTHS} μηνών τήρησης.`,
+    }, ...records]);
+    setConfirming(null);
+    setResponsible("");
+  };
+
+  if (months.length === 0) return null;
+
+  return (
+    <Card className="mb-4 border-2 border-slate-800">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
+        <Archive size={14} /> Διατήρηση Καταγραφών Ποιότητας
+      </p>
+      <p className="text-xs text-slate-500 mb-3">
+        Οι μηνιαίες καταγραφές (θερμοκρασίες/καθαριότητα/λάδι) τηρούνται {RETENTION_MONTHS} μήνες. Εξήγαγε πρώτα σε PDF από τις «Καταγραφές» πριν διαγράψεις.
+      </p>
+      <div className="space-y-1.5">
+        {months.map((mk) => {
+          const age = monthsAgo(mk);
+          const eligible = age >= RETENTION_MONTHS;
+          return (
+            <div key={mk} className="flex items-center justify-between text-sm border-b border-slate-100 pb-1.5">
+              <span className="text-slate-700">{mk} <span className="text-xs text-slate-400">({age} μήνες)</span></span>
+              {eligible ? (
+                confirming === mk ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      placeholder="Υπεύθυνος"
+                      value={responsible}
+                      onChange={(e) => setResponsible(e.target.value)}
+                      className="w-24 border border-red-300 rounded px-1.5 py-1 text-xs"
+                    />
+                    <button onClick={() => deleteMonth(mk)} className="text-xs px-2 py-1 rounded bg-red-600 text-white font-semibold">Επιβεβαίωση</button>
+                    <button onClick={() => setConfirming(null)} className="text-xs px-2 py-1 rounded border border-slate-300">Άκυρο</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirming(mk)} className="text-xs px-2.5 py-1 rounded-lg border border-red-300 text-red-600 font-semibold">Διαγραφή</button>
+                )
+              ) : (
+                <span className="text-[10px] text-slate-400">τηρείται ακόμη {RETENTION_MONTHS - age} μήνες</span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits }) {
+  const [form, setForm] = useState(null);
+
+  const startNew = () => setForm({ id: uid(), code: "", from: "", to: "", destroyDate: "", notes: "", responsible: "" });
+  const save = () => {
+    if (!form.code.trim()) return;
+    const exists = records.some((r) => r.id === form.id);
+    setRecords(exists ? records.map((r) => (r.id === form.id ? form : r)) : [form, ...records]);
+    setForm(null);
+  };
+  const remove = (id) => setRecords(records.filter((r) => r.id !== id));
+
+  return (
+    <div>
+      <SectionTitle icon={Archive} sub="Καταγραφή πότε τηρήθηκαν και πότε καταστράφηκαν παλιά συμπληρωμένα έντυπα.">
+        Αρχειοθέτηση & Καταστροφή Εντύπων
+      </SectionTitle>
+
+      <BusinessInfoPanel info={businessInfo} setInfo={setBusinessInfo} />
+
+      <BackupPanel getBackupText={getBackupText} onImport={onImport} />
+
+      <TechnicianVisitsPanel visits={technicianVisits} setVisits={setTechnicianVisits} />
+
+      <MonthlyRetentionPanel
+        ccpData={ccpData} setCcpData={setCcpData}
+        cleanData={cleanData} setCleanData={setCleanData}
+        oilData={oilData} setOilData={setOilData}
+        records={records} setRecords={setRecords}
+      />
+
+      {!form && (
+        <button onClick={startNew} className="mb-4 flex items-center gap-1.5 bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">
+          <Plus size={16} /> Νέα καταχώρηση
+        </button>
+      )}
+
+      {form && (
+        <Card className="mb-4">
+          <Field label="Κωδικός / τίτλος αρχείου">
+            <input className={inputCls} placeholder="π.χ. ev-H&QE04.02" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
+          </Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Περίοδος από">
+              <input type="date" className={inputCls} value={form.from} onChange={(e) => setForm({ ...form, from: e.target.value })} />
+            </Field>
+            <Field label="Περίοδος έως">
+              <input type="date" className={inputCls} value={form.to} onChange={(e) => setForm({ ...form, to: e.target.value })} />
+            </Field>
+          </div>
+          <Field label="Ημερομηνία καταστροφής">
+            <input type="date" className={inputCls} value={form.destroyDate} onChange={(e) => setForm({ ...form, destroyDate: e.target.value })} />
+          </Field>
+          <Field label="Υπεύθυνος">
+            <input className={inputCls} value={form.responsible} onChange={(e) => setForm({ ...form, responsible: e.target.value })} />
+          </Field>
+          <Field label="Παρατηρήσεις">
+            <textarea rows={2} className={inputCls} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          </Field>
+          <div className="flex gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold flex items-center gap-1">
+              <Save size={14} /> Αποθήκευση
+            </button>
+            <button onClick={() => setForm(null)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </Card>
+      )}
+
+      <div className="space-y-2">
+        {records.length === 0 && <p className="text-sm text-slate-400">Δεν υπάρχουν καταχωρήσεις ακόμα.</p>}
+        {records.map((r) => (
+          <Card key={r.id} className="flex items-center justify-between">
+            <div>
+              <p className="font-mono text-sm font-semibold text-slate-800">{r.code}</p>
+              <p className="text-xs text-slate-500">{r.from} → {r.to} · Καταστροφή: {r.destroyDate || "—"}</p>
+              {r.notes && <p className="text-xs text-slate-400 mt-0.5">{r.notes}</p>}
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => setForm(r)} className="text-xs px-3 py-1.5 border border-slate-300 rounded-lg">Επεξεργασία</button>
+              <button onClick={() => remove(r.id)} className="text-xs px-2 py-1.5 border border-red-200 text-red-600 rounded-lg"><Trash2 size={14} /></button>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ROOT
+   ============================================================ */
+function App() {
+  const [employees, setEmployees, empLoaded] = useStore("employees", []);
+  const [sessions, setSessions] = useStore("training-sessions", []);
+  const [packageCompletions, setPackageCompletions] = useStore("training-packages", []);
+  const [ccpData, setCcpData] = useStore("ccp-logs", {});
+  const [stations, setStations] = useStore("fridge-stations", DEFAULT_FRIDGE_STATIONS);
+
+  // migration: παλιά «Αποθήκη 7 (πατάτας)» χωρίς θερμοκρασία → «Ψυγείο Πατάτας»
+  useEffect(() => {
+    const potato = stations.find((s) => s.id === "apo7");
+    if (potato && potato.type === "dry") {
+      setStations(stations.map((s) => (s.id === "apo7" ? { ...s, name: "Ψυγείο Πατάτας", type: "fridge" } : s)));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stations]);
+  const [shiftNames, setShiftNames] = useStore("shift-names", { Α: "Πρωινή", Β: "Μεσημεριανή", Γ: "Βραδινή" });
+  const [subTabLabels, setSubTabLabels] = useStore("subtab-labels", {});
+  const [displayItems, setDisplayItems] = useStore("display-items", DEFAULT_DISPLAY_ITEMS);
+
+  // migration: αφαίρεση τοστ/σαλάτας/γλυκισμάτων και του ίδιου του «Παγωτό» (μένουν μόνο οι κάδοι)
+  useEffect(() => {
+    const REMOVE_IDS = ["vtoast", "vsalad", "vsweet", "vsoft"];
+    const hasBanned = displayItems.some((d) => REMOVE_IDS.includes(d.id));
+    if (!hasBanned) return;
+    setDisplayItems(displayItems.filter((d) => !REMOVE_IDS.includes(d.id)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [displayItems]);
+
+  const [cleaningAreas, setCleaningAreas, cleaningAreasLoaded] = useStore("cleaning-areas", DEFAULT_CLEANING_AREAS);
+  const [cleanData, setCleanData, cleanDataLoaded] = useStore("cleaning-logs", {});
+
+  // migration: καθαριότητα από (area-string, [name,freq]) → (id σταθερό) ώστε η μετονομασία να μη σπάει το ιστορικό
+  useEffect(() => {
+    if (!cleaningAreasLoaded || !cleanDataLoaded) return; // περιμένουμε να φορτώσουν ΚΑΙ τα δύο πριν αγγίξουμε τίποτα
+    if (!cleaningAreas.length) return;
+    const alreadyMigrated = !!cleaningAreas[0].id && !Array.isArray(cleaningAreas[0].items[0]);
+    if (alreadyMigrated) return;
+    const keyMap = {};
+    const migrated = cleaningAreas.map((g, gi) => {
+      const areaId = g.id || `a${gi}`;
+      const items = g.items.map((it, ii) => {
+        const isOld = Array.isArray(it);
+        const name = isOld ? it[0] : it.name;
+        const freq = isOld ? it[1] : it.freq;
+        const itemId = !isOld && it.id ? it.id : `${areaId}i${ii}`;
+        keyMap[`${g.area}__${name}`] = `${areaId}__${itemId}`;
+        return { id: itemId, name, freq };
+      });
+      return { id: areaId, area: g.area, items };
+    });
+    const newCleanData = {};
+    Object.entries(cleanData).forEach(([mk, days]) => {
+      newCleanData[mk] = {};
+      Object.entries(days).forEach(([date, shifts]) => {
+        newCleanData[mk][date] = {};
+        Object.entries(shifts).forEach(([shift, entries]) => {
+          const newEntries = {};
+          Object.entries(entries).forEach(([k, v]) => { newEntries[keyMap[k] || k] = v; });
+          newCleanData[mk][date][shift] = newEntries;
+        });
+      });
+    });
+    setCleaningAreas(migrated);
+    setCleanData(newCleanData);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleaningAreasLoaded, cleanDataLoaded, cleaningAreas, cleanData]);
+  const [oilData, setOilData] = useStore("oil-logs", {});
+  const [records, setRecords] = useStore("archive-records", []);
+  const [businessInfo, setBusinessInfo] = useStore("business-info", DEFAULT_BUSINESS_INFO);
+  const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
+
+  const [tab, setTab] = useState("daily");
+  const [printContent, setPrintContent] = useState(null);
+
+  const requestPrint = (node) => {
+    setPrintContent(node);
+    setTimeout(() => {
+      window.print();
+      setPrintContent(null);
+    }, 80);
+  };
+
+  const getBackupText = () => {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      employees, sessions, packageCompletions, ccpData, cleanData, oilData, records, stations, shiftNames,
+    };
+    return JSON.stringify(data);
+  };
+
+  const importBackup = (data) => {
+    if (data.employees) setEmployees(data.employees);
+    if (data.sessions) setSessions(data.sessions);
+    if (data.packageCompletions) setPackageCompletions(data.packageCompletions);
+    if (data.ccpData) setCcpData(data.ccpData);
+    if (data.cleanData) setCleanData(data.cleanData);
+    if (data.oilData) setOilData(data.oilData);
+    if (data.records) setRecords(data.records);
+    if (data.stations) setStations(data.stations);
+    if (data.shiftNames) setShiftNames(data.shiftNames);
+  };
+
+  const expiringSoon = employees.filter((e) => {
+    const d = daysUntil(e.healthExpiry);
+    return e.healthExpiry && d <= HEALTH_WARN_DAYS;
+  });
+
+  const tabs = [
+    { id: "daily", label: "Καταγραφές", icon: ClipboardList },
+    { id: "employees", label: "Προσωπικό", icon: Users },
+    { id: "training", label: "Εκπαίδευση", icon: GraduationCap },
+    { id: "haccp", label: "HACCP", icon: GitBranch },
+    { id: "archive", label: "Αρχείο", icon: Archive },
+  ];
+
+  return (
+    <div className="min-h-screen bg-[#F7F5F0] text-slate-800" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
+      <PrintStyles />
+      <header className="bg-slate-900 text-white px-4 py-4 sticky top-0 z-20 shadow-md no-print">
+        <h1 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
+          <Sparkles size={20} className="text-teal-400" /> Αναψυκτήριο · Διαχείριση Ποιότητας
+        </h1>
+        {expiringSoon.length > 0 && (
+          <div className="mt-2 flex items-center gap-1.5 text-amber-300 text-xs font-semibold">
+            <AlertTriangle size={13} />
+            {expiringSoon.length} βιβλιάρι{expiringSoon.length === 1 ? "ο υγείας λήγει" : "α υγείας λήγουν"} σύντομα
+          </div>
+        )}
+      </header>
+
+      <nav className="bg-white border-b border-slate-200 sticky top-[68px] z-10 overflow-x-auto no-print">
+        <div className="flex px-2">
+          {tabs.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex flex-col items-center gap-1 px-4 py-2.5 text-[11px] font-semibold whitespace-nowrap border-b-2 transition-colors
+                ${tab === t.id ? "border-teal-700 text-teal-800" : "border-transparent text-slate-400"}`}
+            >
+              <t.icon size={16} />
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </nav>
+
+      <main className="max-w-2xl mx-auto p-4 pb-16 no-print">
+        {tab === "employees" && <EmployeesTab employees={employees} setEmployees={setEmployees} />}
+        {tab === "training" && <TrainingTab employees={employees} sessions={sessions} setSessions={setSessions} requestPrint={requestPrint} packageCompletions={packageCompletions} setPackageCompletions={setPackageCompletions} businessInfo={businessInfo} />}
+        {tab === "daily" && (
+          <DailyLogsTab
+            ccpData={ccpData} setCcpData={setCcpData}
+            cleanData={cleanData} setCleanData={setCleanData}
+            oilData={oilData} setOilData={setOilData}
+            stations={stations} setStations={setStations}
+            displayItems={displayItems} setDisplayItems={setDisplayItems}
+            cleaningAreas={cleaningAreas} setCleaningAreas={setCleaningAreas}
+            shiftNames={shiftNames} setShiftNames={setShiftNames}
+            subTabLabels={subTabLabels} setSubTabLabels={setSubTabLabels}
+            requestPrint={requestPrint}
+            businessInfo={businessInfo}
+          />
+        )}
+        {tab === "haccp" && <HaccpFlowTab businessInfo={businessInfo} />}
+        {tab === "archive" && (
+          <ArchiveTab
+            records={records} setRecords={setRecords}
+            getBackupText={getBackupText} onImport={importBackup}
+            ccpData={ccpData} setCcpData={setCcpData}
+            cleanData={cleanData} setCleanData={setCleanData}
+            oilData={oilData} setOilData={setOilData}
+            businessInfo={businessInfo} setBusinessInfo={setBusinessInfo}
+            technicianVisits={technicianVisits} setTechnicianVisits={setTechnicianVisits}
+          />
+        )}
+      </main>
+
+      {printContent && <div id="print-root">{printContent}</div>}
+    </div>
+  );
+}
+
+/* ============================================================
+   ΚΛΕΙΔΩΜΑ ΜΕ ΚΩΔΙΚΟ (απλή "πόρτα", όχι πραγματική ασφάλεια)
+   ============================================================ */
+const UNLOCK_CODE = "6969";
+const UNLOCK_KEY = STORAGE_PREFIX + "unlocked";
+
+function PasswordGate({ children }) {
+  const [unlocked, setUnlocked] = useState(() => {
+    try { return window.localStorage.getItem(UNLOCK_KEY) === "yes"; } catch (e) { return false; }
+  });
+  const [code, setCode] = useState("");
+  const [error, setError] = useState(false);
+
+  const tryUnlock = (e) => {
+    e.preventDefault();
+    if (code === UNLOCK_CODE) {
+      try { window.localStorage.setItem(UNLOCK_KEY, "yes"); } catch (e) {}
+      setUnlocked(true);
+      setError(false);
+    } else {
+      setError(true);
+    }
+  };
+
+  if (unlocked) return children;
+
+  return (
+    <div className="min-h-screen bg-[#F7F5F0] flex items-center justify-center p-6">
+      <form onSubmit={tryUnlock} className="bg-white border border-slate-200 rounded-2xl shadow-sm p-6 w-full max-w-xs">
+        <p className="text-xl font-black text-orange-600 mb-1">BREWTOPIA</p>
+        <p className="text-xs text-slate-500 mb-4">Διαχείριση Ποιότητας — εισάγετε τον κωδικό πρόσβασης</p>
+        <input
+          type="password"
+          inputMode="numeric"
+          autoFocus
+          value={code}
+          onChange={(e) => { setCode(e.target.value); setError(false); }}
+          className={`w-full border rounded-lg px-3 py-2 text-sm mb-2 ${error ? "border-red-400" : "border-slate-300"}`}
+          placeholder="Κωδικός"
+        />
+        {error && <p className="text-xs text-red-600 mb-2">Λάθος κωδικός, δοκίμασε ξανά.</p>}
+        <button type="submit" className="w-full bg-teal-700 text-white rounded-lg py-2 text-sm font-semibold">
+          Είσοδος
+        </button>
+      </form>
+    </div>
+  );
+}
+
+try {
+  const root = ReactDOM.createRoot(document.getElementById("root"));
+  root.render(
+    <PasswordGate>
+      <App />
+    </PasswordGate>
+  );
+} catch (e) {
+  document.getElementById("root").innerHTML =
+    '<div style="padding:24px;color:#b91c1c;font-family:sans-serif;font-size:13px;white-space:pre-wrap;">Σφάλμα εφαρμογής: ' + (e && e.message ? e.message : e) + '</div>';
+}
+</script>
+</body>
+</html>
