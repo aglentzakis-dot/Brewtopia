@@ -2267,12 +2267,19 @@ const TECHNICIAN_ACTIONS = [
 
 function AdminCodePanel({ code, setCode }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(code);
+  const [draft, setDraft] = useState("");
+  const [confirmDraft, setConfirmDraft] = useState("");
+  const [error, setError] = useState("");
+
+  const startEdit = () => { setDraft(""); setConfirmDraft(""); setError(""); setEditing(true); };
+
   const save = () => {
-    if (!draft.trim()) return;
+    if (!draft.trim()) { setError("Γράψε νέο κωδικό."); return; }
+    if (draft !== confirmDraft) { setError("Οι κωδικοί δεν ταιριάζουν."); return; }
     setCode(draft.trim());
     setEditing(false);
   };
+
   return (
     <Card className="mb-4">
       <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
@@ -2282,14 +2289,24 @@ function AdminCodePanel({ code, setCode }) {
         Ζητείται για να μπεις στις καρτέλες «Προσωπικό» και «Εκπαίδευση» — ώστε μόνο εσύ να τις βλέπεις.
       </p>
       {!editing ? (
-        <button onClick={() => { setDraft(code); setEditing(true); }} className="text-[11px] text-teal-700 underline">
+        <button onClick={startEdit} className="text-[11px] text-teal-700 underline">
           Αλλαγή κωδικού
         </button>
       ) : (
-        <div className="flex items-center gap-2">
-          <input className={inputCls + " max-w-[140px]"} value={draft} onChange={(e) => setDraft(e.target.value)} />
-          <button onClick={save} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold">Αποθήκευση</button>
-          <button onClick={() => setEditing(false)} className="border border-slate-300 px-3 py-2 rounded-lg text-xs">Άκυρο</button>
+        <div className="space-y-2">
+          <input
+            type="password" inputMode="numeric" autoFocus placeholder="Νέος κωδικός"
+            className={inputCls + " max-w-[160px]"} value={draft} onChange={(e) => { setDraft(e.target.value); setError(""); }}
+          />
+          <input
+            type="password" inputMode="numeric" placeholder="Επανάληψη νέου κωδικού"
+            className={inputCls + " max-w-[160px]"} value={confirmDraft} onChange={(e) => { setConfirmDraft(e.target.value); setError(""); }}
+          />
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <div className="flex items-center gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold">Αποθήκευση</button>
+            <button onClick={() => setEditing(false)} className="border border-slate-300 px-3 py-2 rounded-lg text-xs">Άκυρο</button>
+          </div>
         </div>
       )}
     </Card>
