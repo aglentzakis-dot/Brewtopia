@@ -1812,17 +1812,6 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
       {sub === "clean" && (
         <div className="space-y-3">
-          <div className="flex justify-between items-center">
-            <button onClick={() => setShowCleanGrid((v) => !v)} className="text-[11px] text-teal-700 underline">
-              {showCleanGrid ? "Απόκρυψη μηνιαίου πίνακα" : "Μηνιαίος πίνακας καθαριότητας"}
-            </button>
-            <button onClick={() => setEditingClean((v) => !v)} className="text-[11px] text-slate-400 underline">
-              {editingClean ? "Τέλος επεξεργασίας" : "Επεξεργασία λίστας καθαριότητας"}
-            </button>
-          </div>
-
-          {showCleanGrid && <MonthlyCleaningGrid cleaningAreas={cleaningAreas} cleanData={cleanData} month={exportMonth} />}
-
           {!editingClean && cleaningAreas.map((group) => {
             const visibleItems = group.items.filter((item) => shouldShowCleanItem(item, cleanData, group.id, date));
             if (visibleItems.length === 0) return null;
@@ -1987,6 +1976,19 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
               />
             ))}
           </div>
+        )}
+
+        {sub === "clean" && (
+          <>
+            <button onClick={() => setShowCleanGrid((v) => !v)} className="text-[11px] text-slate-400 underline mt-2">
+              {showCleanGrid ? "Απόκρυψη μηνιαίου πίνακα καθαριότητας" : "Μηνιαίος πίνακας καθαριότητας"}
+            </button>
+            {showCleanGrid && <MonthlyCleaningGrid cleaningAreas={cleaningAreas} cleanData={cleanData} month={exportMonth} />}
+
+            <button onClick={() => setEditingClean((v) => !v)} className="text-[11px] text-slate-400 underline">
+              {editingClean ? "Τέλος επεξεργασίας λίστας καθαριότητας" : "Επεξεργασία λίστας καθαριότητας"}
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -2757,6 +2759,24 @@ function App() {
 
   const [tab, setTab] = useState("daily");
   const [printContent, setPrintContent] = useState(null);
+
+  // ξανακλείδωμα Προσωπικού/Εκπαίδευσης μετά από 15 λεπτά απουσίας
+  const ADMIN_LOCK_GRACE_MS = 15 * 60 * 1000;
+  const adminLeftAtRef = useRef(null);
+  const prevTabRef = useRef(tab);
+  useEffect(() => {
+    const isAdminTab = (t) => t === "employees" || t === "training";
+    const wasAdmin = isAdminTab(prevTabRef.current);
+    const isAdmin = isAdminTab(tab);
+    if (wasAdmin && !isAdmin) {
+      adminLeftAtRef.current = Date.now();
+    }
+    if (isAdmin && adminLeftAtRef.current) {
+      if (Date.now() - adminLeftAtRef.current > ADMIN_LOCK_GRACE_MS) setAdminUnlocked(false);
+      adminLeftAtRef.current = null;
+    }
+    prevTabRef.current = tab;
+  }, [tab]);
 
   const requestPrint = (node) => {
     setPrintContent(node);
