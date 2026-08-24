@@ -241,7 +241,10 @@ const DEFAULT_BUSINESS_INFO = {
   afm: "999962477",
   type: "ΑΝΑΨΥΚΤΗΡΙΟ",
   address: "Λ. Κηφισίας 4, Αθήνα",
+  accentColor: "#0f172a",
 };
+
+const ACCENT_PALETTE = ["#0f172a", "#0f766e", "#ea580c", "#b91c1c", "#4338ca", "#0369a1", "#166534", "#7c3aed"];
 
 // Κεφαλίδα επιχείρησης για PDF (React) — στιλιζαρισμένο κείμενο τύπου λογότυπου
 const PrintLetterhead = ({ info }) => (
@@ -2259,6 +2262,25 @@ function BusinessInfoPanel({ info, setInfo }) {
           <Field label="Διεύθυνση">
             <input className={inputCls} value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
           </Field>
+          <Field label="Χρώμα θέματος (κεφαλίδα)">
+            <div className="flex flex-wrap gap-2 items-center">
+              {ACCENT_PALETTE.map((c) => (
+                <button
+                  key={c}
+                  onClick={() => setDraft({ ...draft, accentColor: c })}
+                  className="w-8 h-8 rounded-full border-2"
+                  style={{ backgroundColor: c, borderColor: draft.accentColor === c ? "#000" : "transparent" }}
+                  aria-label={c}
+                />
+              ))}
+              <input
+                type="color"
+                value={draft.accentColor || "#0f172a"}
+                onChange={(e) => setDraft({ ...draft, accentColor: e.target.value })}
+                className="w-8 h-8 rounded-full border border-slate-300 p-0 overflow-hidden"
+              />
+            </div>
+          </Field>
           <div className="flex gap-2">
             <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
             <button onClick={() => setEditing(false)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
@@ -2883,9 +2905,12 @@ function App() {
   return (
     <div className="min-h-screen bg-[#F7F5F0] text-slate-800" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
       <PrintStyles />
-      <header className="bg-slate-900 text-white px-4 py-4 sticky top-0 z-20 shadow-md no-print">
+      <header
+        className="text-white px-4 py-4 sticky top-0 z-20 shadow-md no-print"
+        style={{ backgroundColor: businessInfo.accentColor || "#0f172a" }}
+      >
         <h1 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
-          <Sparkles size={20} className="text-teal-400" /> Αναψυκτήριο · Διαχείριση Ποιότητας
+          <Sparkles size={20} className="text-teal-300" /> {businessInfo.title || "Αναψυκτήριο"} · Διαχείριση Ποιότητας
         </h1>
         {expiredBooklets.length > 0 && (
           <div className="mt-2 flex items-center gap-1.5 text-red-400 text-xs font-semibold">
