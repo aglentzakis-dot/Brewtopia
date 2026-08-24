@@ -2863,9 +2863,13 @@ function App() {
     if (data.shiftNames) setShiftNames(data.shiftNames);
   };
 
+  const expiredBooklets = employees.filter((e) => {
+    const d = daysUntil(e.healthExpiry);
+    return !e.departureDate && e.healthExpiry && d < 0;
+  });
   const expiringSoon = employees.filter((e) => {
     const d = daysUntil(e.healthExpiry);
-    return !e.departureDate && e.healthExpiry && d <= HEALTH_WARN_DAYS;
+    return !e.departureDate && e.healthExpiry && d >= 0 && d <= HEALTH_WARN_DAYS;
   });
 
   const tabs = [
@@ -2883,8 +2887,14 @@ function App() {
         <h1 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
           <Sparkles size={20} className="text-teal-400" /> Αναψυκτήριο · Διαχείριση Ποιότητας
         </h1>
+        {expiredBooklets.length > 0 && (
+          <div className="mt-2 flex items-center gap-1.5 text-red-400 text-xs font-semibold">
+            <AlertTriangle size={13} />
+            {expiredBooklets.length} βιβλιάρι{expiredBooklets.length === 1 ? "ο υγείας έχει λήξει" : "α υγείας έχουν λήξει"}
+          </div>
+        )}
         {expiringSoon.length > 0 && (
-          <div className="mt-2 flex items-center gap-1.5 text-amber-300 text-xs font-semibold">
+          <div className="mt-1 flex items-center gap-1.5 text-amber-300 text-xs font-semibold">
             <AlertTriangle size={13} />
             {expiringSoon.length} βιβλιάρι{expiringSoon.length === 1 ? "ο υγείας λήγει" : "α υγείας λήγουν"} σύντομα
           </div>
