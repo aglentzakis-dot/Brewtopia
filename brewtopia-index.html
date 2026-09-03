@@ -1387,7 +1387,7 @@ function NewCleanAreaForm({ onAdd }) {
   );
 }
 
-function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo }) {
+function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo, thermoConfig }) {
   const [date, setDate] = useState(todayISO());
   const [shift, setShift] = useState("Α");
   const [sub, setSub] = useState("temps");
@@ -1439,6 +1439,11 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   const setStationType = (idx, type) => {
     const next = [...stations];
     next[idx] = { ...next[idx], type };
+    setStations(next);
+  };
+  const renameStationField = (idx, field, val) => {
+    const next = [...stations];
+    next[idx] = { ...next[idx], [field]: val };
     setStations(next);
   };
   const removeStation = (idx) => setStations(stations.filter((_, i) => i !== idx));
@@ -1535,7 +1540,64 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     setCcpData(next);
   };
 
-  // --- display cases ---
+  // --- ThermoServer (αυτόματες θερμοκρασίες Zigbee) ---
+  const [thermoStatus, setThermoStatus] = useState(null); // null | "loading" | "ok" | "error"
+  const [thermoDevices, setThermoDevices] = useState([]);
+  const [devicesStatus, setDevicesStatus] = useState(null);
+
+  const thermoUrl = () => {
+    const u = thermoConfig?.baseUrl || "";
+    const withProto = u.startsWith("http") ? u : `http://${u}`;
+    return withProto.replace(/\/$/, "");
+  };
+
+  const fetchThermoDevices = async () => {
+    if (!thermoConfig?.baseUrl) return;
+    setDevicesStatus("loading");
+    try {
+      const res = await fetch(`${thermoUrl()}/api/devices`);
+      if (!res.ok) throw new Error("bad response");
+      const data = await res.json();
+      const list = Array.isArray(data) ? data : Object.entries(data).map(([id, v]) => ({ id, ...v }));
+      setThermoDevices(list);
+      setDevicesStatus(list.length > 0 ? "ok" : "error");
+    } catch (e) {
+      setDevicesStatus("error");
+    }
+  };
+
+  const fetchThermoServer = async () => {
+    if (!thermoConfig?.baseUrl) return;
+    setThermoStatus("loading");
+    try {
+      const res = await fetch(`${thermoUrl()}/api/latest`);
+      if (!res.ok) throw new Error("bad response");
+      const data = await res.json(); // αναμένεται { deviceId: { temperature, ... }, ... } ή πίνακας [{id, temperature}]
+      const lookup = Array.isArray(data)
+        ? Object.fromEntries(data.map((d) => [d.id ?? d.device ?? d.deviceId, d]))
+        : data;
+      let matched = 0;
+      const next = { ...ccpData };
+      next[mk] = next[mk] || {};
+      next[mk][date] = next[mk][date] || {};
+      next[mk][date][shift] = { ...next[mk][date][shift] };
+      stations.forEach((st) => {
+        if (!st.sensorId) return;
+        const reading = lookup[st.sensorId];
+        const t = reading?.temperature ?? reading?.temp ?? reading?.value;
+        if (t !== undefined && t !== null) {
+          next[mk][date][shift][st.id] = String(t);
+          matched++;
+        }
+      });
+      setCcpData(next);
+      setThermoStatus(matched > 0 ? "ok" : "error");
+    } catch (e) {
+      setThermoStatus("error");
+    }
+  };
+
+
   const dayDisplay = ccpData?.[mk]?.[date]?.[shift]?._display || {};
   const setDisplay = (id, val) => {
     const next = { ...ccpData };
@@ -1698,6 +1760,25 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
             <Thermometer size={13} /> Ψυγεία ≤ 7°C &nbsp;·&nbsp; Κατάψυξη ≤ -16°C
           </div>
 
+          {thermoConfig.enabled && thermoConfig.baseUrl && (
+            <div className="mb-3">
+              <button
+                onClick={fetchThermoServer}
+                disabled={thermoStatus === "loading"}
+                className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold flex items-center gap-1.5 disabled:opacity-60"
+              >
+                <RotateCcw size={13} className={thermoStatus === "loading" ? "animate-spin" : ""} />
+                {thermoStatus === "loading" ? "Ανανέωση…" : "Ανανέωση από ThermoServer"}
+              </button>
+              {thermoStatus === "error" && (
+                <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε ότι είσαι στο WiFi του καταστήματος.</p>
+              )}
+              {thermoStatus === "ok" && (
+                <p className="text-[11px] text-teal-700 mt-1">Ενημερώθηκαν οι θερμοκρασίες από τους αισθητήρες.</p>
+              )}
+            </div>
+          )}
+
           {!editingStations && (
             <div className="space-y-2">
               {stations.map((st) => {
@@ -1738,6 +1819,19 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
           {editingStations && (
             <div className="space-y-2">
               <p className="text-xs text-slate-500 mb-1">Με τα βελάκια αλλάζεις τη σειρά. Πάτα στο όνομα για να το αλλάξεις.</p>
+              {thermoConfig.enabled && thermoConfig.baseUrl && (
+                <button
+                  onClick={fetchThermoDevices}
+                  disabled={devicesStatus === "loading"}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-white font-semibold mb-1 flex items-center gap-1.5"
+                >
+                  <RotateCcw size={13} className={devicesStatus === "loading" ? "animate-spin" : ""} />
+                  {devicesStatus === "loading" ? "Φόρτωση…" : "Φόρτωσε λίστα αισθητήρων"}
+                </button>
+              )}
+              {devicesStatus === "error" && (
+                <p className="text-[11px] text-red-600 mb-1">Δεν βρέθηκαν αισθητήρες — έλεγξε τη σύνδεση στο ThermoServer.</p>
+              )}
               {stations.map((st, idx) => (
                 <div key={st.id} className="border border-slate-200 rounded-lg p-2 space-y-2">
                   <div className="flex items-center gap-2">
@@ -1765,6 +1859,29 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                       >{label}</button>
                     ))}
                   </div>
+                  {st.type !== "dry" && (
+                    <div className="pl-9">
+                      {thermoDevices.length > 0 ? (
+                        <select
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1.5 text-[11px] bg-white"
+                          value={st.sensorId || ""}
+                          onChange={(e) => renameStationField(idx, "sensorId", e.target.value)}
+                        >
+                          <option value="">— χωρίς αυτόματο αισθητήρα —</option>
+                          {thermoDevices.map((d) => (
+                            <option key={d.id} value={d.id}>{d.name || d.id}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          placeholder="Zigbee sensor ID (προαιρετικό, για αυτόματη θερμοκρασία)"
+                          className="w-full border border-slate-200 rounded-lg px-2 py-1 text-[11px]"
+                          value={st.sensorId || ""}
+                          onChange={(e) => renameStationField(idx, "sensorId", e.target.value)}
+                        />
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
               <button onClick={addStation} className="w-full flex items-center justify-center gap-1.5 border-2 border-dashed border-slate-300 text-slate-500 rounded-lg py-2 text-sm font-semibold">
@@ -2359,6 +2476,49 @@ const TECHNICIAN_ACTIONS = [
   "Χρειάζεται παρακολούθηση / επανέλεγχος",
 ];
 
+function ThermoServerPanel({ config, setConfig }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(config);
+  const save = () => { setConfig(draft); setEditing(false); };
+
+  return (
+    <Card className="mb-4">
+      <p className="text-xs font-bold uppercase tracking-wide text-slate-800 mb-1 flex items-center gap-1.5">
+        <Droplet size={14} /> ThermoServer (αυτόματες θερμοκρασίες)
+      </p>
+      <p className="text-xs text-slate-500 mb-2">
+        Σύνδεση με το τοπικό σύστημα Zigbee αισθητήρων στο PC του καταστήματος (μόνο μέσα στο ίδιο WiFi).
+      </p>
+      {!editing ? (
+        <>
+          <p className="text-xs text-slate-600 mb-2">
+            Διεύθυνση: <b>{config.baseUrl || "— δεν έχει οριστεί —"}</b>
+            {" · "}
+            {config.enabled ? <span className="text-teal-700 font-semibold">ενεργό</span> : <span className="text-slate-400">ανενεργό</span>}
+          </p>
+          <button onClick={() => { setDraft(config); setEditing(true); }} className="text-[11px] text-teal-700 underline">
+            Επεξεργασία
+          </button>
+        </>
+      ) : (
+        <div className="space-y-2">
+          <Field label="Διεύθυνση PC (IP:πόρτα)">
+            <input className={inputCls} placeholder="π.χ. 192.168.1.50:3000" value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} />
+          </Field>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" className="w-4 h-4 accent-teal-700" checked={!!draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
+            Ενεργοποίηση αυτόματων θερμοκρασιών
+          </label>
+          <div className="flex gap-2">
+            <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
+            <button onClick={() => setEditing(false)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function AdminCodePanel({ code, setCode }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
@@ -2699,7 +2859,7 @@ function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, o
   );
 }
 
-function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, safetyTechnician, setSafetyTechnician }) {
+function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig }) {
   const [form, setForm] = useState(null);
 
   const startNew = () => setForm({ id: uid(), code: "", from: "", to: "", destroyDate: "", notes: "", responsible: "" });
@@ -2718,6 +2878,8 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
       </SectionTitle>
 
       <BusinessInfoPanel info={businessInfo} setInfo={setBusinessInfo} />
+
+      <ThermoServerPanel config={thermoConfig} setConfig={setThermoConfig} />
 
       <AdminCodePanel code={adminCode} setCode={setAdminCode} />
 
@@ -2889,6 +3051,7 @@ function App() {
 
   const [records, setRecords] = useStore("archive-records", []);
   const [businessInfo, setBusinessInfo] = useStore("business-info", DEFAULT_BUSINESS_INFO);
+  const [thermoConfig, setThermoConfig] = useStore("thermo-config", { baseUrl: "", enabled: false });
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
   const [adminCode, setAdminCode] = useStore("admin-code", "1234");
   const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
@@ -3023,6 +3186,7 @@ function App() {
             subTabLabels={subTabLabels} setSubTabLabels={setSubTabLabels}
             requestPrint={requestPrint}
             businessInfo={businessInfo}
+            thermoConfig={thermoConfig}
           />
         )}
         {tab === "haccp" && <HaccpFlowTab businessInfo={businessInfo} />}
@@ -3037,6 +3201,7 @@ function App() {
             technicianVisits={technicianVisits} setTechnicianVisits={setTechnicianVisits}
             adminCode={adminCode} setAdminCode={setAdminCode}
             safetyTechnician={safetyTechnician} setSafetyTechnician={setSafetyTechnician}
+            thermoConfig={thermoConfig} setThermoConfig={setThermoConfig}
           />
         )}
       </main>
