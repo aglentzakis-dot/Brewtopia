@@ -125,6 +125,8 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
+const APP_VERSION = "2026-09-03.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+
 const SHIFTS = ["Α", "Β", "Γ"];
 
 const DEFAULT_FRIDGE_STATIONS = [
@@ -3145,6 +3147,7 @@ function App() {
       >
         <h1 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
           <Sparkles size={20} className="text-teal-300" /> {businessInfo.title || "Αναψυκτήριο"} · Διαχείριση Ποιότητας
+          <span className="text-[10px] font-normal text-white/50 ml-auto">v{APP_VERSION}</span>
         </h1>
         {expiredBooklets.length > 0 && (
           <div className="mt-2 flex items-center gap-1.5 text-red-400 text-xs font-semibold">
