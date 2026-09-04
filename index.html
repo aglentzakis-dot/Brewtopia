@@ -125,7 +125,12 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-09-03.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-09-04.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+
+// Cloudflare Access — στοιχεία σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
+// Συμπλήρωσε εδώ τα πραγματικά Client ID / Client Secret πριν ανεβάσεις το αρχείο.
+const CF_ACCESS_CLIENT_ID = "";
+const CF_ACCESS_CLIENT_SECRET = "";
 
 const SHIFTS = ["Α", "Β", "Γ"];
 
@@ -1553,11 +1558,20 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     return withProto.replace(/\/$/, "");
   };
 
+  // Κάθε αίτημα προς το ThermoServer περνάει από εδώ, ώστε τα Cloudflare Access
+  // headers να μπαίνουν πάντα αυτόματα, χωρίς επανάληψη σε κάθε fetch.
+  const thermoFetch = (path) => fetch(`${thermoUrl()}${path}`, {
+    headers: {
+      "CF-Access-Client-Id": a0731d2b7691deb80c5f122448086958.access,
+      "CF-Access-Client-Secret": CF-Access-Client-Secret: cfast_Q4rLqe57pU6mBjSyTdPsBCpawnvDSyDRBVGyOiWS792076da,
+    },
+  });
+
   const fetchThermoDevices = async () => {
     if (!thermoConfig?.baseUrl) return;
     setDevicesStatus("loading");
     try {
-      const res = await fetch(`${thermoUrl()}/api/devices`);
+      const res = await thermoFetch("/api/devices");
       if (!res.ok) throw new Error("bad response");
       const data = await res.json();
       let list = [];
@@ -1585,7 +1599,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     if (!thermoConfig?.baseUrl) return;
     setThermoStatus("loading");
     try {
-      const res = await fetch(`${thermoUrl()}/api/latest`);
+      const res = await thermoFetch("/api/latest");
       if (!res.ok) throw new Error("bad response");
       const data = await res.json(); // αναμένεται { deviceId: { temperature, ... }, ... } ή πίνακας [{id, temperature}]
       const lookup = Array.isArray(data)
