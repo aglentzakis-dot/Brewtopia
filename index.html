@@ -129,8 +129,8 @@ const APP_VERSION = "2026-09-04.1"; // αλλάζει σε κάθε νέα έκ�
 
 // Cloudflare Access — στοιχεία σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
 // Συμπλήρωσε εδώ τα πραγματικά Client ID / Client Secret πριν ανεβάσεις το αρχείο.
-const CF_ACCESS_CLIENT_ID = "";
-const CF_ACCESS_CLIENT_SECRET = "";
+const CF_ACCESS_CLIENT_ID = "a0731d2b7691deb80c5f122448086958.access";
+const CF_ACCESS_CLIENT_SECRET = "cfast_Q4rLqe57pU6mBjSyTdPsBCpawnvDSyDRBVGyOiWS792076da";
 
 const SHIFTS = ["Α", "Β", "Γ"];
 
@@ -1562,8 +1562,8 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   // headers να μπαίνουν πάντα αυτόματα, χωρίς επανάληψη σε κάθε fetch.
   const thermoFetch = (path) => fetch(`${thermoUrl()}${path}`, {
     headers: {
-      "CF-Access-Client-Id": a0731d2b7691deb80c5f122448086958.access,
-      "CF-Access-Client-Secret": CF-Access-Client-Secret: cfast_Q4rLqe57pU6mBjSyTdPsBCpawnvDSyDRBVGyOiWS792076da,
+      "CF-Access-Client-Id": CF_ACCESS_CLIENT_ID,
+      "CF-Access-Client-Secret": CF_ACCESS_CLIENT_SECRET,
     },
   });
 
