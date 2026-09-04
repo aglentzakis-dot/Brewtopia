@@ -1558,7 +1558,20 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       const res = await fetch(`${thermoUrl()}/api/devices`);
       if (!res.ok) throw new Error("bad response");
       const data = await res.json();
-      const list = Array.isArray(data) ? data : Object.entries(data).map(([id, v]) => ({ id, ...v }));
+      let list = [];
+      if (Array.isArray(data)) {
+        // Μορφή ThermoServer: εναλλασσόμενος πίνακας [όνομα, id, όνομα, id, ...]
+        const looksFlatPairs = data.every((x) => typeof x === "string");
+        if (looksFlatPairs) {
+          for (let i = 0; i < data.length; i += 2) {
+            if (data[i + 1] !== undefined) list.push({ id: data[i + 1], name: data[i] });
+          }
+        } else {
+          list = data; // ήδη λίστα αντικειμένων {id, name, ...}
+        }
+      } else {
+        list = Object.entries(data).map(([id, v]) => ({ id, ...(typeof v === "object" ? v : { name: v }) }));
+      }
       setThermoDevices(list);
       setDevicesStatus(list.length > 0 ? "ok" : "error");
     } catch (e) {
