@@ -125,12 +125,12 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-09-04.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-09-04.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 // Cloudflare Access — στοιχεία σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
 // Συμπλήρωσε εδώ τα πραγματικά Client ID / Client Secret πριν ανεβάσεις το αρχείο.
-const CF_ACCESS_CLIENT_ID = "a0731d2b7691deb80c5f122448086958.access";
-const CF_ACCESS_CLIENT_SECRET = "cfast_Q4rLqe57pU6mBjSyTdPsBCpawnvDSyDRBVGyOiWS792076da";
+const CF_ACCESS_CLIENT_ID = "037d1d4acf5679e24fc69fbdaa10ae40.access";
+const CF_ACCESS_CLIENT_SECRET = "cfast_Vfr5vzBcOwqYJEzb6IkhJ5c26il6N8Dgu9UepMLB059fbd1b";
 
 const SHIFTS = ["Α", "Β", "Γ"];
 
@@ -3080,7 +3080,7 @@ function App() {
 
   const [records, setRecords] = useStore("archive-records", []);
   const [businessInfo, setBusinessInfo] = useStore("business-info", DEFAULT_BUSINESS_INFO);
-  const [thermoConfig, setThermoConfig] = useStore("thermo-config", { baseUrl: "", enabled: false });
+  const [thermoConfig, setThermoConfig] = useStore("thermo-config", { baseUrl: "https://thermo.brewtopia-thermo.com", enabled: true });
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
   const [adminCode, setAdminCode] = useStore("admin-code", "1234");
   const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
