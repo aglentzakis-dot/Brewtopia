@@ -125,7 +125,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-09-04.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-09-04.3"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 // Cloudflare Access — στοιχεία σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
 // Συμπλήρωσε εδώ τα πραγματικά Client ID / Client Secret πριν ανεβάσεις το αρχείο.
@@ -1606,6 +1606,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         ? Object.fromEntries(data.map((d) => [d.id ?? d.device ?? d.deviceId, d]))
         : data;
       let matched = 0;
+      const anyMapped = stations.some((st) => st.sensorId);
       const next = { ...ccpData };
       next[mk] = next[mk] || {};
       next[mk][date] = next[mk][date] || {};
@@ -1620,7 +1621,9 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         }
       });
       setCcpData(next);
-      setThermoStatus(matched > 0 ? "ok" : "error");
+      if (matched > 0) setThermoStatus("ok");
+      else if (!anyMapped) setThermoStatus("no-sensors");
+      else setThermoStatus("no-match");
     } catch (e) {
       setThermoStatus("error");
     }
@@ -1800,7 +1803,13 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                 {thermoStatus === "loading" ? "Ανανέωση…" : "Ανανέωση από ThermoServer"}
               </button>
               {thermoStatus === "error" && (
-                <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε ότι είσαι στο WiFi του καταστήματος.</p>
+                <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε τη διεύθυνση ή το δίκτυο.</p>
+              )}
+              {thermoStatus === "no-sensors" && (
+                <p className="text-[11px] text-amber-600 mt-1">Συνδέθηκε επιτυχώς, αλλά κανένα ψυγείο σε αυτή τη συσκευή δεν έχει συνδεδεμένο αισθητήρα ακόμα — πήγαινε στην «Επεξεργασία λίστας» → «Φόρτωσε λίστα αισθητήρων» για να τα συνδέσεις.</p>
+              )}
+              {thermoStatus === "no-match" && (
+                <p className="text-[11px] text-amber-600 mt-1">Συνδέθηκε επιτυχώς, αλλά δεν βρέθηκαν τιμές για τους συνδεδεμένους αισθητήρες — έλεγξε αν είναι σωστά επιλεγμένοι.</p>
               )}
               {thermoStatus === "ok" && (
                 <p className="text-[11px] text-teal-700 mt-1">Ενημερώθηκαν οι θερμοκρασίες από τους αισθητήρες.</p>
