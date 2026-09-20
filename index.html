@@ -125,7 +125,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-09-20.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-09-20.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -2403,6 +2403,19 @@ function BackupPanel({ getBackupText, onImport }) {
   const [dirHandle, setDirHandle] = useState(null);
   const [dirPerm, setDirPerm] = useState(null); // null | "granted" | "prompt" | "denied"
   const [savingToFolder, setSavingToFolder] = useState(false);
+  const [lastAuto, setLastAuto] = useState(() => {
+    try { return localStorage.getItem("brewtopia-last-autobackup"); } catch { return null; }
+  });
+
+  // Ανανέωσε την ένδειξη "τελευταία αυτόματη αποθήκευση" κάθε λίγο, όσο είναι ανοιχτό το πάνελ
+  // (το πραγματικό αυτόματο αντίγραφο τρέχει στο παρασκήνιο, ανεξάρτητα από αυτό το πάνελ — δες App()).
+  useEffect(() => {
+    if (!fsSupported) return;
+    const t = setInterval(() => {
+      try { setLastAuto(localStorage.getItem("brewtopia-last-autobackup")); } catch {}
+    }, 30000);
+    return () => clearInterval(t);
+  }, [fsSupported]);
 
   // Στην εκκίνηση, φόρτωσε τυχόν αποθηκευμένο φάκελο και έλεγξε αν έχουμε ακόμα άδεια.
   useEffect(() => {
@@ -2463,6 +2476,8 @@ function BackupPanel({ getBackupText, onImport }) {
       const writable = await fileHandle.createWritable();
       await writable.write(getBackupText());
       await writable.close();
+      try { localStorage.setItem("brewtopia-last-autobackup", new Date().toISOString()); } catch {}
+      setLastAuto(new Date().toISOString());
       setStatus({ ok: true, msg: `Αποθηκεύτηκε ως "${filename}" στο φάκελο "${dirHandle.name}".` });
     } catch (err) {
       setStatus({ ok: false, msg: "Η αποθήκευση στο φάκελο απέτυχε: " + (err && err.message ? err.message : err) });
@@ -2513,14 +2528,24 @@ function BackupPanel({ getBackupText, onImport }) {
         <div className="mb-3 p-2.5 rounded-lg bg-slate-50 border border-slate-200">
           <p className="text-[11px] font-bold uppercase tracking-wide text-slate-600 mb-1.5">Αυτόματη αποθήκευση σε φάκελο</p>
           {!dirHandle ? (
-            <button onClick={chooseFolder} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold flex items-center gap-1.5">
-              <Save size={13} /> Επιλογή φακέλου
-            </button>
+            <>
+              <button onClick={chooseFolder} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold flex items-center gap-1.5">
+                <Save size={13} /> Επιλογή φακέλου
+              </button>
+              <p className="text-[10px] text-slate-400 mt-1.5">
+                Συμβουλή: αν επιλέξεις έναν φάκελο μέσα στο Google Drive ή στο OneDrive του υπολογιστή σου, το αντίγραφο θα ανεβαίνει μόνο του στο cloud κάθε φορά — έτσι έχεις πάντα ένα πρόσφατο αντίγραφο διαθέσιμο από παντού.
+              </p>
+            </>
           ) : (
             <div>
-              <p className="text-xs text-slate-700 mb-2">
+              <p className="text-xs text-slate-700 mb-1">
                 Επιλεγμένος φάκελος: <span className="font-semibold">{dirHandle.name}</span>
                 {dirPerm === "denied" && <span className="text-red-600 font-semibold"> — χωρίς άδεια</span>}
+              </p>
+              <p className="text-[10px] text-slate-500 mb-2">
+                {lastAuto
+                  ? `Αυτόματη αποθήκευση εκεί κάθε λίγα λεπτά όσο η εφαρμογή είναι ανοιχτή. Τελευταία φορά: ${new Date(lastAuto).toLocaleString("el-GR")}.`
+                  : "Αυτόματη αποθήκευση εκεί κάθε λίγα λεπτά όσο η εφαρμογή είναι ανοιχτή (χρειάζεται πρώτα ένα «Αποθήκευση εδώ τώρα» για να δοθεί η άδεια)."}
               </p>
               <div className="flex flex-wrap gap-2">
                 <button onClick={saveToFolder} disabled={savingToFolder} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold disabled:opacity-60">
@@ -3283,6 +3308,43 @@ function App() {
     if (data.stations) setStations(data.stations);
     if (data.shiftNames) setShiftNames(data.shiftNames);
   };
+
+  // Αυτόματο αντίγραφο ασφαλείας στον επιλεγμένο φάκελο (αν έχει επιλεγεί — βλ. BackupPanel).
+  // Τρέχει αθόρυβα στο παρασκήνιο όσο η εφαρμογή είναι ανοιχτή: μία φορά στην εκκίνηση,
+  // κάθε 10 λεπτά, και κάθε φορά που η καρτέλα κρύβεται/αλλάζει (π.χ. αλλαγή εφαρμογής/καρτέλας).
+  // Αν ο φάκελος είναι π.χ. μέσα σε Google Drive/OneDrive που συγχρονίζεται μόνο του με το cloud,
+  // αυτό δίνει ένα σχεδόν αυτόματο "συγχρονισμό" δεδομένων όποτε δουλεύεις από υπολογιστή.
+  const getBackupTextRef = useRef(getBackupText);
+  useEffect(() => { getBackupTextRef.current = getBackupText; });
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") return;
+    const autoBackupToFolder = async () => {
+      try {
+        const handle = await idbGetBrewtopia(BREWTOPIA_IDB_KEY);
+        if (!handle) return;
+        const perm = await handle.queryPermission({ mode: "readwrite" });
+        if (perm !== "granted") return; // δεν ζητάμε άδεια αυτόματα — χρειάζεται χειρονομία χρήστη
+        const stamp = new Date().toISOString().slice(0, 10);
+        const filename = `brewtopia-backup-${stamp}.json`;
+        const fileHandle = await handle.getFileHandle(filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(getBackupTextRef.current());
+        await writable.close();
+        try { localStorage.setItem("brewtopia-last-autobackup", new Date().toISOString()); } catch {}
+      } catch {
+        // αθόρυβη αποτυχία — δεν διακόπτουμε τη δουλειά του χρήστη
+      }
+    };
+    autoBackupToFolder();
+    const interval = setInterval(autoBackupToFolder, 10 * 60 * 1000);
+    const onVisibility = () => { if (document.visibilityState === "hidden") autoBackupToFolder(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, []);
 
   const expiredBooklets = employees.filter((e) => {
     const d = daysUntil(e.healthExpiry);
