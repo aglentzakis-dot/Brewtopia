@@ -125,7 +125,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-12.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-12.6"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -3348,6 +3348,15 @@ function App() {
   const [records, setRecords] = useStore("archive-records", []);
   const [businessInfo, setBusinessInfo] = useStore("business-info", DEFAULT_BUSINESS_INFO);
   const [thermoConfig, setThermoConfig] = useStore("thermo-config", { baseUrl: "https://thermo.brewtopia-thermo.com", enabled: true });
+  // Μετάβαση: παλιά αποθηκευμένη διεύθυνση τύπου http://IP:3000 δεν δουλεύει ποτέ από τη σελίδα https (αποκλείεται από τον browser)
+  // → αντικαθίσταται αυτόματα με την ασφαλή διεύθυνση του ThermoServer.
+  useEffect(() => {
+    const u = (thermoConfig && thermoConfig.baseUrl) || "";
+    if (!u || /^http:\/\//i.test(u)) {
+      setThermoConfig({ ...(thermoConfig || {}), baseUrl: "https://thermo.brewtopia-thermo.com", enabled: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
   const [adminCode, setAdminCode] = useStore("admin-code", "1234");
   const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
@@ -3521,7 +3530,7 @@ function App() {
       >
         <h1 className="text-lg font-extrabold tracking-tight flex items-center gap-2">
           <Sparkles size={20} className="text-teal-300" /> {businessInfo.title || "Αναψυκτήριο"} · Διαχείριση Ποιότητας
-          <span className="text-[10px] font-normal text-white/50 ml-auto">v{APP_VERSION}</span>
+          <span className="text-[11px] font-bold text-amber-300 ml-auto whitespace-nowrap">v{APP_VERSION}</span>
         </h1>
         {expiredBooklets.length > 0 && (
           <div className="mt-2 flex items-center gap-1.5 text-red-400 text-xs font-semibold">
