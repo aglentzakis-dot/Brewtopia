@@ -125,7 +125,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-12.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-12.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1974,6 +1974,9 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                           {thermoDevices.map((d) => (
                             <option key={d.id} value={d.id}>{d.name || d.id}</option>
                           ))}
+                          {st.sensorId && !thermoDevices.some((d) => d.id === st.sensorId) && (
+                            <option value={st.sensorId}>{st.sensorId} (δεν υπάρχει στη λίστα του ThermoServer)</option>
+                          )}
                         </select>
                       ) : (
                         <input
@@ -2486,6 +2489,38 @@ function BackupPanel({ getBackupText, onImport }) {
     setStatus({ ok: true, msg: "Ο φάκελος αφαιρέθηκε. Μπορείς να επιλέξεις άλλον." });
   };
 
+  // Επαναφορά όλων των δεδομένων από το πιο πρόσφατο αντίγραφο του φακέλου (π.χ. σε νέα συσκευή ή αν χαθούν δεδομένα).
+  const restoreFromFolder = async () => {
+    if (!dirHandle) return;
+    try {
+      let perm = await dirHandle.queryPermission({ mode: "readwrite" });
+      if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "readwrite" });
+      setDirPerm(perm);
+      if (perm !== "granted") {
+        setStatus({ ok: false, msg: "Δεν δόθηκε άδεια πρόσβασης στο φάκελο." });
+        return;
+      }
+      const names = [];
+      for await (const [name, h] of dirHandle.entries()) {
+        if (h.kind === "file" && /^brewtopia-backup-.*\.json$/.test(name)) names.push(name);
+      }
+      if (!names.length) {
+        setStatus({ ok: false, msg: "Δεν βρέθηκαν αντίγραφα Brewtopia μέσα στο φάκελο." });
+        return;
+      }
+      names.sort();
+      const newest = names[names.length - 1];
+      if (!window.confirm(`Να γίνει επαναφορά από το «${newest}»; Τα τρέχοντα δεδομένα αυτής της συσκευής θα αντικατασταθούν.`)) return;
+      const fh = await dirHandle.getFileHandle(newest);
+      const file = await fh.getFile();
+      const data = JSON.parse(await file.text());
+      onImport(data);
+      setStatus({ ok: true, msg: `Έγινε επαναφορά από το «${newest}».` });
+    } catch (err) {
+      setStatus({ ok: false, msg: "Η επαναφορά απέτυχε: " + (err && err.message ? err.message : err) });
+    }
+  };
+
   const saveToFolder = async () => {
     if (!dirHandle) return;
     setSavingToFolder(true);
@@ -2530,9 +2565,31 @@ function BackupPanel({ getBackupText, onImport }) {
     }
   };
 
+  const [undoAt, setUndoAt] = useState(() => {
+    try { const r = localStorage.getItem("brewtopia-pre-import"); return r ? JSON.parse(r).at : null; } catch { return null; }
+  });
+
+  const undoImport = () => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("brewtopia-pre-import"));
+      if (!saved || !saved.text) return;
+      if (!window.confirm("Να γυρίσουν τα δεδομένα όπως ήταν ΠΡΙΝ την τελευταία εισαγωγή;")) return;
+      onImport(JSON.parse(saved.text));
+      setStatus({ ok: true, msg: "Τα δεδομένα επανήλθαν όπως ήταν πριν την εισαγωγή." });
+    } catch {
+      setStatus({ ok: false, msg: "Δεν ήταν δυνατή η αναίρεση." });
+    }
+  };
+
   const applyImport = () => {
     try {
       const data = JSON.parse(importText);
+      if (!window.confirm("Η εισαγωγή αντικαθιστά τα δεδομένα αυτής της συσκευής με αυτά του κειμένου. Θα κρατηθεί αντίγραφο των τωρινών για αναίρεση. Να συνεχίσω;")) return;
+      try {
+        const at = new Date().toISOString();
+        localStorage.setItem("brewtopia-pre-import", JSON.stringify({ at, text: getBackupText() }));
+        setUndoAt(at);
+      } catch {}
       onImport(data);
       setStatus({ ok: true, msg: "Τα δεδομένα επαναφέρθηκαν επιτυχώς." });
       setMode(null);
@@ -2578,6 +2635,7 @@ function BackupPanel({ getBackupText, onImport }) {
                 <button onClick={saveToFolder} disabled={savingToFolder} className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold disabled:opacity-60">
                   {savingToFolder ? "Αποθήκευση…" : "Αποθήκευση εδώ τώρα"}
                 </button>
+                <button onClick={restoreFromFolder} className="text-xs px-3 py-1.5 rounded-lg border border-teal-700 text-teal-700 font-semibold">Επαναφορά από τον φάκελο</button>
                 <button onClick={chooseFolder} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 font-semibold">Αλλαγή φακέλου</button>
                 <button onClick={forgetFolder} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 font-semibold">Αφαίρεση</button>
               </div>
@@ -2597,6 +2655,14 @@ function BackupPanel({ getBackupText, onImport }) {
           </button>
           <button onClick={() => { setMode("import"); setStatus(null); }} className="text-xs px-3 py-1.5 rounded-lg border border-slate-300 font-semibold flex items-center gap-1.5">
             <Plus size={13} /> Εισαγωγή (επικόλληση κειμένου)
+          </button>
+        </div>
+      )}
+
+      {undoAt && !mode && (
+        <div className="mt-2">
+          <button onClick={undoImport} className="text-xs px-3 py-1.5 rounded-lg border border-amber-500 text-amber-700 font-semibold">
+            Αναίρεση τελευταίας εισαγωγής ({new Date(undoAt).toLocaleString("el-GR")})
           </button>
         </div>
       )}
@@ -3285,6 +3351,36 @@ function App() {
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
   const [adminCode, setAdminCode] = useStore("admin-code", "1234");
   const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
+
+  // Προστασία αντιστοίχισης ψυγείο→αισθητήρας: κρατιέται και σε ξεχωριστό κλειδί, ώστε αν χαθεί από τη λίστα σταθμών
+  // (π.χ. επαναφορά παλιού αντιγράφου, επαναφορά προεπιλογών) να ξαναμπαίνει αυτόματα.
+  // Αν ο χρήστης το αδειάσει ΡΗΤΑ (επιλέγοντας «χωρίς αισθητήρα») σβήνεται και από εδώ.
+  const [sensorMap, setSensorMap] = useStore("sensor-map", {});
+  useEffect(() => {
+    let mapChanged = false;
+    let stationsChanged = false;
+    const nextMap = { ...sensorMap };
+    const nextStations = stations.map((st) => {
+      if (st.sensorId) {
+        if (nextMap[st.id] !== st.sensorId) { nextMap[st.id] = st.sensorId; mapChanged = true; }
+        return st;
+      }
+      if (st.sensorId === "") {
+        if (nextMap[st.id]) { delete nextMap[st.id]; mapChanged = true; }
+        return st;
+      }
+      if (nextMap[st.id]) { stationsChanged = true; return { ...st, sensorId: nextMap[st.id] }; }
+      return st;
+    });
+    if (mapChanged) setSensorMap(nextMap);
+    if (stationsChanged) setStations(nextStations);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stations]);
+
+  // Ζητά από τον browser να μην σβήνει ποτέ τα δεδομένα της εφαρμογής όταν λιγοστεύει ο χώρος.
+  useEffect(() => {
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch {}
+  }, []);
   const [adminUnlocked, setAdminUnlocked] = useState(false); // μόνο για τη διάρκεια της συνεδρίας, όχι μόνιμο
 
   const [tab, setTab] = useState("daily");
@@ -3320,7 +3416,7 @@ function App() {
     const data = {
       exportedAt: new Date().toISOString(),
       employees, sessions, packageCompletions, ccpData, cleanData, oilData, records, stations, shiftNames,
-      subTabLabels, displayItems, cleaningAreas, businessInfo, technicianVisits, safetyTechnician,
+      subTabLabels, displayItems, cleaningAreas, businessInfo, technicianVisits, safetyTechnician, sensorMap,
     };
     return JSON.stringify(data);
   };
@@ -3341,6 +3437,7 @@ function App() {
     if (data.businessInfo) setBusinessInfo(data.businessInfo);
     if (data.technicianVisits) setTechnicianVisits(data.technicianVisits);
     if (data.safetyTechnician) setSafetyTechnician(data.safetyTechnician);
+    if (data.sensorMap) setSensorMap(data.sensorMap);
   };
 
   // Αυτόματο αντίγραφο ασφαλείας στον επιλεγμένο φάκελο (αν έχει επιλεγεί — βλ. BackupPanel).
@@ -3352,6 +3449,8 @@ function App() {
   useEffect(() => { getBackupTextRef.current = getBackupText; });
 
   const autoBackupRef = useRef(null);
+  const emptyRef = useRef(false);
+  emptyRef.current = employees.length === 0 && Object.keys(ccpData || {}).length === 0 && records.length === 0;
   const backupDataKey = JSON.stringify([
     employees, sessions, packageCompletions, ccpData, cleanData, oilData, records, stations, shiftNames,
     subTabLabels, displayItems, cleaningAreas, businessInfo, technicianVisits, safetyTechnician,
@@ -3372,6 +3471,8 @@ function App() {
         if (!handle) return;
         const perm = await handle.queryPermission({ mode: "readwrite" });
         if (perm !== "granted") return; // δεν ζητάμε άδεια αυτόματα — χρειάζεται χειρονομία χρήστη
+        // Ασφάλεια: αν η συσκευή φαίνεται «άδεια» (π.χ. χάθηκαν δεδομένα), ΔΕΝ γράφουμε από πάνω στο καλό αντίγραφο.
+        if (emptyRef.current) return;
         const stamp = new Date().toISOString().slice(0, 10);
         const filename = `brewtopia-backup-${stamp}.json`;
         const fileHandle = await handle.getFileHandle(filename, { create: true });
