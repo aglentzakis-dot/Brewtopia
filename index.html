@@ -125,7 +125,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-12.6"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-17.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1616,6 +1616,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   const [thermoStatus, setThermoStatus] = useState(null); // null | "loading" | "ok" | "error"
   const [thermoDevices, setThermoDevices] = useState([]);
   const [devicesStatus, setDevicesStatus] = useState(null);
+  const [thermoCode, setThermoCode] = useState(null);
 
   const thermoUrl = () => {
     const u = thermoConfig?.baseUrl || "";
@@ -1665,7 +1666,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     setThermoStatus("loading");
     try {
       const res = await thermoFetch("/api/latest");
-      if (!res.ok) throw new Error("bad response");
+      if (!res.ok) { setThermoCode(res.status); throw new Error("http"); }
       const data = await res.json(); // αναμένεται { deviceId: { temperature, ... }, ... } ή πίνακας [{id, temperature}]
       const lookup = Array.isArray(data)
         ? Object.fromEntries(data.map((d) => [d.id ?? d.device ?? d.deviceId, d]))
@@ -1690,7 +1691,14 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       else if (!anyMapped) setThermoStatus("no-sensors");
       else setThermoStatus("no-match");
     } catch (e) {
-      setThermoStatus("error");
+      if (e && e.message === "http") { setThermoStatus("error-http"); return; }
+      // Διάγνωση: αίτημα χωρίς ειδικές κεφαλίδες (no-cors). Αν ο διακομιστής απαντά, φταίει ο αποκλεισμός CORS/Access· αλλιώς δεν βρίσκεται καθόλου.
+      try {
+        await fetch(`${thermoUrl()}/api/latest`, { mode: "no-cors", cache: "no-store" });
+        setThermoStatus("error-blocked");
+      } catch {
+        setThermoStatus("error-unreachable");
+      }
     }
   };
 
@@ -1869,6 +1877,15 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
               </button>
               {thermoStatus === "error" && (
                 <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε τη διεύθυνση ή το δίκτυο.</p>
+              )}
+              {thermoStatus === "error-blocked" && (
+                <p className="text-[11px] text-red-600 mt-1">Ο διακομιστής ανταποκρίνεται, αλλά το Cloudflare Access μπλοκάρει το αίτημα από αυτή τη σελίδα (ρύθμιση CORS). Χρειάζεται αλλαγή στο Cloudflare — όχι στο δίκτυο ή στη διεύθυνση.</p>
+              )}
+              {thermoStatus === "error-unreachable" && (
+                <p className="text-[11px] text-red-600 mt-1">Δεν βρέθηκε ο διακομιστής. Έλεγξε ότι έχεις internet, ότι το PC του μαγαζιού είναι ανοιχτό και ότι τρέχει το Cloudflare Tunnel.</p>
+              )}
+              {thermoStatus === "error-http" && (
+                <p className="text-[11px] text-red-600 mt-1">Ο διακομιστής απάντησε με σφάλμα (κωδικός {thermoCode}). 403 = λάθος κλειδιά Cloudflare· 5xx = το PC ή το ThermoServer δεν τρέχει.</p>
               )}
               {thermoStatus === "no-sensors" && (
                 <p className="text-[11px] text-amber-600 mt-1">Συνδέθηκε επιτυχώς, αλλά κανένα ψυγείο σε αυτή τη συσκευή δεν έχει συνδεδεμένο αισθητήρα ακόμα — πήγαινε στην «Επεξεργασία λίστας» → «Φόρτωσε λίστα αισθητήρων» για να τα συνδέσεις.</p>
