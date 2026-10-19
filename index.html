@@ -125,7 +125,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-17.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-19.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -399,10 +399,174 @@ const daysUntil = (iso) => {
   return Math.round(diff);
 };
 
+/* SYNC-PURE-START */
+/* ============================================================
+   ΣΥΓΧΡΟΝΙΣΜΟΣ ΣΥΣΚΕΥΩΝ — καθαρή λογική συγχώνευσης (χωρίς δίκτυο / χωρίς React)
+   Κανόνες:
+   • Καμία συγχώνευση δεν ΜΕΙΩΝΕΙ δεδομένα: λίστες και ημερήσιες καταγραφές ενώνονται (union).
+   • Ρυθμίσεις: κερδίζει η πιο πρόσφατη αλλαγή· στην ισοπαλία κερδίζει η ΚΥΡΙΑ συσκευή.
+   • Ένα άδειο σύνολο δεν νικά ποτέ ένα γεμάτο.
+   ============================================================ */
+const SYNC_DATA_KEYS = {
+  // κλειδί αντιγράφου: [κλειδί αποθήκευσης (useStore), είδος συγχώνευσης]
+  employees: ["employees", "list"],
+  sessions: ["training-sessions", "list"],
+  packageCompletions: ["training-packages", "list"],
+  records: ["archive-records", "list"],
+  technicianVisits: ["technician-visits", "list"],
+  ccpData: ["ccp-logs", "log"],
+  cleanData: ["cleaning-logs", "log"],
+  oilData: ["oil-logs", "log"],
+  sensorMap: ["sensor-map", "log"],
+  stations: ["fridge-stations", "list"],
+  shiftNames: ["shift-names", "set"],
+  subTabLabels: ["subtab-labels", "set"],
+  displayItems: ["display-items", "list"],
+  cleaningAreas: ["cleaning-areas", "list"],
+  businessInfo: ["business-info", "set"],
+  safetyTechnician: ["safety-technician", "set"],
+};
+const SYNC_LOG_KEYS = ["ccpData", "cleanData", "oilData"];
+
+// JSON με ταξινομημένα κλειδιά: δύο ίδια δεδομένα με διαφορετική σειρά κλειδιών θεωρούνται ίδια.
+const syncStable = (x) => JSON.stringify(x, (k, v) => (v && typeof v === "object" && !Array.isArray(v) ? Object.keys(v).sort().reduce((o, kk) => { o[kk] = v[kk]; return o; }, {}) : v));
+const syncIsPlain = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+const syncIsEmptyVal = (x) =>
+  x === undefined || x === null || (Array.isArray(x) && x.length === 0) || (syncIsPlain(x) && Object.keys(x).length === 0);
+const syncItemKey = (x) =>
+  x !== null && typeof x === "object" && x.id !== undefined && x.id !== null ? "id:" + x.id : "j:" + JSON.stringify(x);
+
+// Ένωση λιστών ανά id· στην ίδια εγγραφή κερδίζει η πλευρά που προτιμάται. Η σειρά της τοπικής λίστας διατηρείται.
+function syncMergeList(a, b, preferB, tsA, tsB) {
+  if (!Array.isArray(a)) return Array.isArray(b) ? b : a;
+  if (!Array.isArray(b)) return a;
+  const bMap = new Map();
+  b.forEach((x) => bMap.set(syncItemKey(x), x));
+  const seen = new Set();
+  const out = [];
+  a.forEach((x) => {
+    const k = syncItemKey(x);
+    seen.add(k);
+    if (bMap.has(k)) {
+      const ta = (tsA && tsA[k]) || 0, tb = (tsB && tsB[k]) || 0;
+      out.push((ta !== tb ? tb > ta : preferB) ? bMap.get(k) : x); // κερδίζει η πιο πρόσφατη αλλαγή της ΙΔΙΑΣ εγγραφής
+    } else out.push(x);
+  });
+  b.forEach((x) => { if (!seen.has(syncItemKey(x))) out.push(x); });
+  return out;
+}
+
+// Βαθιά ένωση αντικειμένων (ημερήσιες καταγραφές). Σε σύγκρουση τιμής κερδίζει η προτιμώμενη πλευρά.
+function syncDeepMerge(a, b, preferB) {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  if (syncIsPlain(a) && syncIsPlain(b)) {
+    const out = {};
+    Object.keys(a).forEach((k) => { out[k] = k in b ? syncDeepMerge(a[k], b[k], preferB) : a[k]; });
+    Object.keys(b).forEach((k) => { if (!(k in a)) out[k] = b[k]; });
+    return out;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) return syncMergeList(a, b, preferB);
+  if (syncStable(a) === syncStable(b)) return a;
+  // κενή τιμή δεν νικά ποτέ γεμάτη
+  if (syncIsEmptyVal(b) && !syncIsEmptyVal(a)) return a;
+  if (syncIsEmptyVal(a) && !syncIsEmptyVal(b)) return b;
+  return preferB ? b : a;
+}
+
+// Ποια πλευρά προτιμάται (true = η απομακρυσμένη). Ντετερμινιστικό, ώστε όλες οι συσκευές να καταλήγουν στο ίδιο.
+function syncPreferRemote(tsL, tsR, local, remote) {
+  if (tsR !== tsL) return tsR > tsL;
+  const lm = local.role === "master", rm = remote.role === "master";
+  if (lm !== rm) return rm;
+  return String(remote.deviceId) > String(local.deviceId);
+}
+
+function syncStripPurged(data, purged) {
+  if (!purged) return data;
+  SYNC_LOG_KEYS.forEach((k) => {
+    if (syncIsPlain(data[k])) {
+      const copy = { ...data[k] };
+      Object.keys(purged).forEach((mk) => { delete copy[mk]; });
+      data[k] = copy;
+    }
+  });
+  return data;
+}
+
+// local / remote: { data, meta, role, deviceId }. Επιστρέφει νέο { data, meta, purged } (δεν αλλάζει τις εισόδους).
+const syncShapeOk = (k, v) => (SYNC_DATA_KEYS[k][1] === "list" ? Array.isArray(v) : syncIsPlain(v));
+function syncClampTs(t) { const lim = Date.now() + 5 * 60 * 1000; return t > lim ? lim : t; }
+function syncMerge(local, remote, purgedLocal, purgedRemote) {
+  const data = {};
+  const meta = {};
+  const itemMeta = {};
+  Object.keys(SYNC_DATA_KEYS).forEach((k) => {
+    const kind = SYNC_DATA_KEYS[k][1];
+    const la = local.data ? local.data[k] : undefined;
+    let rb = remote.data ? remote.data[k] : undefined;
+    if (rb !== undefined && !syncShapeOk(k, rb)) rb = undefined; // λάθος μορφή από άλλη συσκευή/έκδοση: αγνοείται
+    const tsL = syncClampTs((local.meta && local.meta[k]) || 0);
+    const tsR = syncClampTs((remote.meta && remote.meta[k]) || 0);
+    meta[k] = Math.max(tsL, tsR);
+    const imL = (local.itemMeta && local.itemMeta[k]) || {};
+    const imR = (remote.itemMeta && remote.itemMeta[k]) || {};
+    if (kind === "list") {
+      const im = { ...imR };
+      Object.keys(imL).forEach((ik) => { im[ik] = Math.max(imL[ik] || 0, im[ik] || 0); });
+      itemMeta[k] = im;
+    }
+    if (rb === undefined) { if (la !== undefined) data[k] = la; return; }
+    if (la === undefined) { data[k] = rb; return; }
+    const preferR = syncPreferRemote(tsL, tsR, local, remote);
+    if (kind === "set") {
+      if (syncIsEmptyVal(rb) && !syncIsEmptyVal(la)) data[k] = la;
+      else if (syncIsEmptyVal(la) && !syncIsEmptyVal(rb)) data[k] = rb;
+      else data[k] = preferR ? rb : la;
+    } else if (kind === "list") {
+      data[k] = syncMergeList(la, rb, preferR, imL, imR);
+    } else {
+      data[k] = syncDeepMerge(la, rb, preferR);
+    }
+  });
+  const purged = { ...(purgedRemote || {}), ...(purgedLocal || {}) };
+  syncStripPurged(data, purged);
+  return { data, meta, purged, itemMeta };
+}
+
+// Πόσες «εγγραφές» έχει ένα αντίγραφο (για τον κανόνα «ποτέ 0» και τα αντίγραφα «πριν»).
+function syncCount(data) {
+  if (!data) return 0;
+  let n = 0;
+  ["employees", "sessions", "packageCompletions", "records", "technicianVisits"].forEach((k) => {
+    if (Array.isArray(data[k])) n += data[k].length;
+  });
+  SYNC_LOG_KEYS.forEach((k) => {
+    if (syncIsPlain(data[k])) Object.values(data[k]).forEach((m) => { if (syncIsPlain(m)) n += Object.keys(m).length; });
+  });
+  return n;
+}
+
+// Ποια κλειδιά διαφέρουν ανάμεσα σε δύο σύνολα δεδομένων.
+function syncChangedKeys(before, after) {
+  return Object.keys(SYNC_DATA_KEYS).filter(
+    (k) => after[k] !== undefined && syncStable(before ? before[k] : undefined) !== syncStable(after[k])
+  );
+}
+
+// Έλεγχος εγκυρότητας αρχείου άλλης συσκευής.
+function syncValidSnapshot(s) {
+  return !!(s && typeof s === "object" && s.format === "brewtopia-sync-1" && typeof s.deviceId === "string" && s.deviceId &&
+    syncIsPlain(s.data) && syncIsPlain(s.meta || {}));
+}
+/* SYNC-PURE-END */
+
 /* ============================================================
    STORAGE HOOK
    ============================================================ */
 const STORAGE_PREFIX = "brewtopia:";
+const SYNC_STORE_TO_DATA = {};
+Object.keys(SYNC_DATA_KEYS).forEach((k) => { SYNC_STORE_TO_DATA[SYNC_DATA_KEYS[k][0]] = k; });
 
 function useStore(key, initial) {
   const [value, setValue] = useState(() => {
@@ -415,12 +579,34 @@ function useStore(key, initial) {
   });
   const loaded = true; // localStorage είναι σύγχρονο — φορτωμένο αμέσως
 
+  const valueRef = useRef(value);
   const persist = useCallback((next) => {
     setValue(next);
+    const prevForStamp = valueRef.current;
+    valueRef.current = next;
     try {
       window.localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(next));
+      // σημάδι «πότε άλλαξε τελευταία φορά αυτό το σύνολο» για τον συγχρονισμό συσκευών (όχι όταν η αλλαγή έρχεται από τον ίδιο το συγχρονισμό)
+      const dk = SYNC_STORE_TO_DATA[key];
+      if (dk && !window.__brewtopiaSyncApplying && SYNC_DATA_KEYS[dk][1] === "list" && Array.isArray(next)) {
+        // ανά εγγραφή: πότε άλλαξε τελευταία φορά (ώστε στη σύγκρουση να κερδίζει η πιο πρόσφατη ΕΓΓΡΑΦΗ, όχι ολόκληρη η λίστα)
+        const prevMap = new Map();
+        (Array.isArray(prevForStamp) ? prevForStamp : []).forEach((x) => prevMap.set(syncItemKey(x), syncStable(x)));
+        const im = JSON.parse(window.localStorage.getItem("brewtopia-sync-itemts") || "{}");
+        const cur = im[dk] || {};
+        const now = Date.now();
+        next.forEach((x) => { const ik = syncItemKey(x); if (prevMap.get(ik) !== syncStable(x)) cur[ik] = now; });
+        im[dk] = cur;
+        window.localStorage.setItem("brewtopia-sync-itemts", JSON.stringify(im));
+      }
+      if (dk && !window.__brewtopiaSyncApplying) {
+        const m = JSON.parse(window.localStorage.getItem("brewtopia-sync-meta") || "{}");
+        m[dk] = Date.now();
+        window.localStorage.setItem("brewtopia-sync-meta", JSON.stringify(m));
+      }
     } catch (e) {
       console.error("Αποτυχία αποθήκευσης", e);
+      window.__brewtopiaPersistFailed = true;
     }
   }, [key]);
 
@@ -3114,6 +3300,11 @@ function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, o
   const [responsible, setResponsible] = useState("");
 
   const deleteMonth = (mk) => {
+    try { // ο μήνας δηλώνεται «διαγραμμένος» ώστε να μην τον επαναφέρει ο συγχρονισμός από άλλη συσκευή
+      const pg = JSON.parse(window.localStorage.getItem("brewtopia-sync-purged") || "{}");
+      pg[mk] = Date.now();
+      window.localStorage.setItem("brewtopia-sync-purged", JSON.stringify(pg));
+    } catch (e) {}
     const next1 = { ...ccpData }; delete next1[mk]; setCcpData(next1);
     const next2 = { ...cleanData }; delete next2[mk]; setCleanData(next2);
     const next3 = { ...oilData }; delete next3[mk]; setOilData(next3);
@@ -3172,7 +3363,7 @@ function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, o
   );
 }
 
-function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig }) {
+function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig, sync }) {
   const [form, setForm] = useState(null);
 
   const startNew = () => setForm({ id: uid(), code: "", from: "", to: "", destroyDate: "", notes: "", responsible: "" });
@@ -3195,6 +3386,8 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
       <ThermoServerPanel config={thermoConfig} setConfig={setThermoConfig} />
 
       <AdminCodePanel code={adminCode} setCode={setAdminCode} />
+
+      {sync && <SyncPanel sync={sync} />}
 
       <BackupPanel getBackupText={getBackupText} onImport={onImport} />
 
@@ -3269,6 +3462,377 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
 /* ============================================================
    ROOT
    ============================================================ */
+/* ============================================================
+   ΣΥΓΧΡΟΝΙΣΜΟΣ ΣΥΣΚΕΥΩΝ ΜΕΣΩ GOOGLE DRIVE
+   Κάθε συσκευή γράφει ΜΟΝΟ το δικό της αρχείο «brewtopia-sync-<συσκευή>.json» στο GlenApps › Brewtopia
+   και διαβάζει τα αρχεία των άλλων. Η συγχώνευση γίνεται τοπικά (βλ. syncMerge) και ΠΟΤΕ δεν σβήνει δεδομένα.
+   ============================================================ */
+const SYNC_CLIENT_ID = "631139595852-r9uib4okhoh13nrb48bau1llqpoekik3.apps.googleusercontent.com";
+const SYNC_SCOPE = "https://www.googleapis.com/auth/drive.file";
+const SYNC_FILE_PREFIX = "brewtopia-sync-";
+const SYNC_LS = {
+  get(k, d) { try { const r = window.localStorage.getItem(k); return r ? JSON.parse(r) : d; } catch (e) { return d; } },
+  set(k, v) { try { window.localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+};
+
+function syncGetDevice() {
+  let d = SYNC_LS.get("brewtopia-sync-device", null);
+  if (!d || !d.id) {
+    const mobile = /Android|iPhone|iPad|Mobile/i.test((typeof navigator !== "undefined" && navigator.userAgent) || "");
+    d = { id: "d" + Math.random().toString(36).slice(2, 10) + Date.now().toString(36), name: mobile ? "Κινητό" : "Υπολογιστής", role: "secondary", enabled: false };
+    SYNC_LS.set("brewtopia-sync-device", d);
+  }
+  return d;
+}
+
+// Τα τρέχοντα δεδομένα διαβάζονται ΑΠΟ ΤΟ localStorage (πηγή αλήθειας, σύγχρονο), όχι από την κατάσταση της React.
+function syncReadLocalData(fallbackText) {
+  const out = {};
+  let fb = null;
+  Object.keys(SYNC_DATA_KEYS).forEach((k) => {
+    let v;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_PREFIX + SYNC_DATA_KEYS[k][0]);
+      if (raw) v = JSON.parse(raw);
+    } catch (e) { v = undefined; }
+    if (v === undefined) {
+      if (fb === null) { try { fb = JSON.parse(fallbackText()); } catch (e) { fb = {}; } }
+      v = fb[k];
+    }
+    if (v !== undefined) out[k] = v;
+  });
+  return out;
+}
+
+const syncHash = (s) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return String(h) + ":" + s.length; };
+
+function syncLoadGis() {
+  return new Promise((res, rej) => {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) return res();
+    const s = document.createElement("script");
+    s.src = "https://accounts.google.com/gsi/client";
+    s.async = true;
+    s.onload = () => res();
+    s.onerror = () => rej(new Error("Δεν φορτώθηκε η σύνδεση Google — έλεγξε το διαδίκτυο."));
+    document.head.appendChild(s);
+  });
+}
+
+async function syncGfetch(token, url, opts) {
+  const o = opts || {};
+  const r = await fetch(url, { ...o, headers: { Authorization: "Bearer " + token, ...(o.headers || {}) } });
+  if (!r.ok) {
+    const t = await r.text().catch(() => "");
+    const e = new Error("Google Drive " + r.status + (t ? ": " + t.slice(0, 140) : ""));
+    e.status = r.status;
+    throw e;
+  }
+  return r;
+}
+
+async function syncFindOrCreateFolder(token, name, parentId) {
+  const q = `mimeType='application/vnd.google-apps.folder' and name='${name}' and trashed=false and '${parentId || "root"}' in parents`;
+  const r = await syncGfetch(token, "https://www.googleapis.com/drive/v3/files?orderBy=createdTime&pageSize=10&fields=files(id,name)&q=" + encodeURIComponent(q));
+  const j = await r.json();
+  if (j.files && j.files.length) return j.files[0].id;
+  const c = await syncGfetch(token, "https://www.googleapis.com/drive/v3/files?fields=id", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder", ...(parentId ? { parents: [parentId] } : {}) }),
+  });
+  return (await c.json()).id;
+}
+
+async function syncUploadJson(token, fileId, folderId, name, text) {
+  const b = "bt" + Math.random().toString(36).slice(2);
+  const meta = fileId ? {} : { name, parents: [folderId], mimeType: "application/json" };
+  const body = `--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(meta)}\r\n--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${text}\r\n--${b}--`;
+  const url = fileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=multipart&fields=id`
+    : "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
+  const r = await syncGfetch(token, url, { method: fileId ? "PATCH" : "POST", headers: { "Content-Type": "multipart/related; boundary=" + b }, body });
+  return (await r.json()).id;
+}
+
+function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
+  const [device, setDeviceState] = useState(() => syncGetDevice());
+  const [status, setStatus] = useState({ state: "idle", msg: "", last: SYNC_LS.get("brewtopia-sync-last", null), devices: SYNC_LS.get("brewtopia-sync-devices", []) });
+  const [hasPreSync, setHasPreSync] = useState(() => !!SYNC_LS.get("brewtopia-pre-sync", null));
+  const tokenRef = useRef(null);
+  const lockRef = useRef(false);
+  const deviceRef = useRef(device);
+  deviceRef.current = device;
+  const needsLoginRef = useRef(false);
+
+  const setDevice = (patch) => {
+    const next = { ...deviceRef.current, ...patch };
+    deviceRef.current = next;
+    SYNC_LS.set("brewtopia-sync-device", next);
+    setDeviceState(next);
+  };
+
+  const getToken = (interactive) => new Promise((resolve, reject) => {
+    if (tokenRef.current && tokenRef.current.exp > Date.now() + 60000) return resolve(tokenRef.current.value);
+    syncLoadGis().then(() => {
+      let done = false;
+      const timer = setTimeout(() => { if (!done) { done = true; reject(Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true })); } }, interactive ? 120000 : 15000);
+      const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); fn(v); };
+      const client = window.google.accounts.oauth2.initTokenClient({
+        client_id: SYNC_CLIENT_ID,
+        scope: SYNC_SCOPE,
+        callback: (resp) => {
+          if (resp && resp.access_token) {
+            tokenRef.current = { value: resp.access_token, exp: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
+            finish(resolve, resp.access_token);
+          } else {
+            finish(reject, Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true }));
+          }
+        },
+        error_callback: () => finish(reject, Object.assign(new Error("Η σύνδεση με Google ακυρώθηκε ή μπλοκαρίστηκε."), { needsLogin: true })),
+      });
+      client.requestAccessToken({ prompt: interactive ? (SYNC_LS.get("brewtopia-sync-consented", false) ? "" : "consent") : "none" });
+    }).catch(reject);
+  });
+
+  const runSync = async (interactive) => {
+    if (lockRef.current) return;
+    if (!interactive && (!deviceRef.current.enabled || needsLoginRef.current)) return;
+    lockRef.current = true;
+    setStatus((s) => ({ ...s, state: "running", msg: "Συγχρονισμός…" }));
+    try {
+      const dev = deviceRef.current;
+      const token = await getToken(interactive);
+      SYNC_LS.set("brewtopia-sync-consented", true);
+      needsLoginRef.current = false;
+
+      // ο φάκελος βρίσκεται ξανά σε κάθε γύρο (ο παλαιότερος κερδίζει), ώστε δύο συσκευές να καταλήγουν πάντα στον ίδιο
+      const rootId = await syncFindOrCreateFolder(token, "GlenApps", null);
+      const folderId = await syncFindOrCreateFolder(token, "Brewtopia", rootId);
+      const files = [];
+      try {
+        let pageToken = "";
+        for (let guard = 0; guard < 20; guard++) {
+          const listQ = `'${folderId}' in parents and trashed=false`;
+          const lj = await (await syncGfetch(token, "https://www.googleapis.com/drive/v3/files?pageSize=200&fields=nextPageToken,files(id,name,modifiedTime)&q=" + encodeURIComponent(listQ) + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : ""))).json();
+          (lj.files || []).forEach((f) => { if (f.name.startsWith(SYNC_FILE_PREFIX)) files.push(f); });
+          pageToken = lj.nextPageToken || "";
+          if (!pageToken) break;
+          if (guard === 19) throw new Error("Πάρα πολλά αρχεία στο φάκελο συγχρονισμού.");
+        }
+      } catch (e) {
+        if (e.status === 404) { try { window.localStorage.removeItem("brewtopia-sync-folder"); } catch (e2) {} }
+        throw e;
+      }
+      const ownName = SYNC_FILE_PREFIX + dev.id + ".json";
+      const own = files.find((f) => f.name === ownName);
+
+      // 1) κατεβάζουμε τα αρχεία των άλλων συσκευών (δίκτυο) — ΠΡΙΝ διαβάσουμε τα τοπικά δεδομένα
+      const remotes = [];
+      let skipped = 0;
+      for (const f of files) {
+        if (f.name === ownName || !f.name.endsWith(".json") || f.name.includes("-prin-")) continue;
+        try {
+          const txt = await (await syncGfetch(token, `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).text();
+          const s = JSON.parse(txt);
+          if (syncValidSnapshot(s) && s.deviceId !== dev.id) remotes.push(s); else skipped++;
+        } catch (e) { skipped++; }
+      }
+
+      // 2) από εδώ και κάτω ΟΛΑ σύγχρονα: διάβασμα τοπικών → συγχώνευση → εφαρμογή (δεν χωράει αλλαγή του χρήστη στη μέση)
+      if (window.__brewtopiaPersistFailed) throw new Error("Η αποθήκευση σε αυτή τη συσκευή απέτυχε (γεμάτος χώρος;). Ο συγχρονισμός σταμάτησε για να μη χαθεί αλλαγή. Ξαναφόρτωσε τη σελίδα.");
+      const localData = syncReadLocalData(() => fallbackTextRef.current());
+      const localMeta = SYNC_LS.get("brewtopia-sync-meta", {});
+      let purged = SYNC_LS.get("brewtopia-sync-purged", {});
+      let cur = { data: localData, meta: localMeta, itemMeta: SYNC_LS.get("brewtopia-sync-itemts", {}), role: dev.role, deviceId: dev.id };
+      remotes.forEach((r) => {
+        const m = syncMerge(cur, { data: r.data, meta: r.meta || {}, itemMeta: r.itemMeta || {}, role: r.role, deviceId: r.deviceId }, purged, r.purged);
+        cur = { ...cur, data: m.data, meta: m.meta, itemMeta: m.itemMeta };
+        purged = m.purged;
+      });
+      // σύγκριση «δίκαιη»: οι μήνες που έχουν διαγραφεί νόμιμα δεν μετρούν ως απώλεια
+      const localForGuard = syncStripPurged({ ...localData }, purged);
+      if (syncCount(cur.data) < syncCount(localForGuard)) throw new Error("Ο συγχρονισμός ακυρώθηκε: θα μείωνε τα δεδομένα. Δεν άλλαξε τίποτα.");
+      const changed = syncChangedKeys(localData, cur.data);
+      if (changed.length) {
+        // αντίγραφο «πριν» — αν δεν γίνει να αποθηκευτεί, ΔΕΝ εφαρμόζουμε τίποτα. Ένα παλιότερο αντίγραφο (<30 λεπτά) δεν αντικαθίσταται.
+        const oldSnap = SYNC_LS.get("brewtopia-pre-sync", null);
+        const fresh = oldSnap && oldSnap.at && Date.now() - new Date(oldSnap.at).getTime() < 30 * 60 * 1000;
+        if (!fresh) {
+          if (!SYNC_LS.set("brewtopia-pre-sync", { at: new Date().toISOString(), data: localData })) throw new Error("Δεν υπάρχει χώρος για αντίγραφο ασφαλείας πριν τον συγχρονισμό — δεν άλλαξε τίποτα.");
+        }
+        setHasPreSync(true);
+        const partial = {};
+        changed.forEach((k) => { partial[k] = cur.data[k]; });
+        window.__brewtopiaSyncApplying = true;
+        try { applyRef.current(partial); } finally { window.__brewtopiaSyncApplying = false; }
+      }
+      SYNC_LS.set("brewtopia-sync-meta", cur.meta);
+      SYNC_LS.set("brewtopia-sync-itemts", cur.itemMeta);
+      SYNC_LS.set("brewtopia-sync-purged", purged);
+
+      // 3) ανεβάζουμε το δικό μας αρχείο (ποτέ από «άδεια» εφαρμογή, ποτέ αν δεν άλλαξε τίποτα)
+      const total = syncCount(cur.data);
+      let uploaded = false;
+      if (total > 0) {
+        const core = JSON.stringify({ data: cur.data, meta: cur.meta, itemMeta: cur.itemMeta, purged, role: dev.role, name: dev.name });
+        const h = syncHash(core);
+        if (!own || SYNC_LS.get("brewtopia-sync-lasthash", null) !== h) {
+          const lastCount = SYNC_LS.get("brewtopia-sync-lastcount", 0);
+          if (own && total < lastCount) {
+            // κανόνας «πριν»: αν το νέο έχει λιγότερες εγγραφές, κρατάμε αντίγραφο του προηγούμενου
+            await syncGfetch(token, `https://www.googleapis.com/drive/v3/files/${own.id}/copy`, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: `${SYNC_FILE_PREFIX}${dev.id}-prin-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, parents: [folderId] }),
+            });
+          }
+          const snap = { format: "brewtopia-sync-1", deviceId: dev.id, deviceName: dev.name, role: dev.role, appVersion: APP_VERSION, savedAt: new Date().toISOString(), meta: cur.meta, itemMeta: cur.itemMeta, purged, data: cur.data };
+          await syncUploadJson(token, own ? own.id : null, folderId, ownName, JSON.stringify(snap));
+          SYNC_LS.set("brewtopia-sync-lasthash", h);
+          SYNC_LS.set("brewtopia-sync-lastcount", total);
+          uploaded = true;
+        }
+      }
+      const devices = remotes.map((r) => ({ name: r.deviceName || "Άγνωστη", role: r.role, at: r.savedAt }));
+      const masters = devices.filter((d) => d.role === "master").length + (dev.role === "master" ? 1 : 0);
+      const now = new Date().toISOString();
+      SYNC_LS.set("brewtopia-sync-last", now);
+      SYNC_LS.set("brewtopia-sync-devices", devices);
+      const notes = [];
+      if (changed.length) notes.push(`ενημερώθηκαν ${changed.length} ενότητες από άλλη συσκευή`);
+      if (uploaded) notes.push("ανέβηκαν τα δικά σου");
+      if (total === 0) notes.push("δεν ανέβηκε τίποτα — η εφαρμογή είναι άδεια");
+      if (masters > 1) notes.push("ΠΡΟΣΟΧΗ: έχουν οριστεί περισσότερες από μία κύριες συσκευές");
+      if (masters === 0) notes.push("δεν έχει οριστεί κύρια συσκευή");
+      if (skipped) notes.push(`${skipped} αρχείο/α αγνοήθηκαν`);
+      setStatus({ state: masters !== 1 ? "warn" : "ok", msg: notes.length ? notes.join(" · ") : "όλα ενημερωμένα", last: now, devices });
+    } catch (e) {
+      if (e && e.status === 401) { tokenRef.current = null; e.needsLogin = true; }
+      if (e && e.needsLogin) {
+        needsLoginRef.current = true;
+        setStatus((s) => ({ ...s, state: "needs-login", msg: "Χρειάζεται να πατήσεις «Σύνδεση / Συγχρονισμός τώρα»." }));
+      } else {
+        setStatus((s) => ({ ...s, state: "error", msg: (e && e.message) || "Άγνωστο σφάλμα" }));
+      }
+    } finally {
+      lockRef.current = false;
+    }
+  };
+  const runRef = useRef(runSync);
+  runRef.current = runSync;
+
+  const enable = async () => {
+    needsLoginRef.current = false;
+    setDevice({ enabled: true });
+    await runRef.current(true);
+  };
+  const syncNow = async () => { needsLoginRef.current = false; await runRef.current(true); };
+  const disable = () => { setDevice({ enabled: false }); setStatus((s) => ({ ...s, state: "idle", msg: "Ο συγχρονισμός είναι ανενεργός σε αυτή τη συσκευή." })); };
+  const undoLast = () => {
+    const snap = SYNC_LS.get("brewtopia-pre-sync", null);
+    if (!snap || !snap.data) return false;
+    // πρώτα κρατιέται αντίγραφο της τωρινής κατάστασης· αν δεν γίνει, δεν επαναφέρουμε
+    if (!SYNC_LS.set("brewtopia-pre-undo", { at: new Date().toISOString(), data: syncReadLocalData(() => fallbackTextRef.current()) })) return false;
+    setDevice({ enabled: false });
+    window.__brewtopiaSyncApplying = true;
+    try { applyRef.current(snap.data); } finally { window.__brewtopiaSyncApplying = false; }
+    return true;
+  };
+
+  // Προφόρτωση της σύνδεσης Google, ώστε το παράθυρο σύνδεσης να ανοίγει αμέσως με το πάτημα του κουμπιού (αλλιώς το μπλοκάρει ο browser)
+  useEffect(() => { syncLoadGis().catch(() => {}); }, []);
+
+  // Αυτόματα: λίγο μετά από κάθε αλλαγή, κάθε 90 δευτερόλεπτα ενώ η σελίδα φαίνεται, και όταν ξαναφαίνεται η σελίδα.
+  useEffect(() => {
+    if (!device.enabled) return;
+    const t = setTimeout(() => runRef.current(false), 6000);
+    return () => clearTimeout(t);
+  }, [dataKey, device.enabled]);
+  useEffect(() => {
+    if (!device.enabled) return;
+    const iv = setInterval(() => { if (document.visibilityState === "visible") runRef.current(false); }, 90000);
+    const onVis = () => { if (document.visibilityState === "visible") { needsLoginRef.current = false; runRef.current(false); } };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
+  }, [device.enabled]);
+
+  return { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync };
+}
+
+function SyncPanel({ sync }) {
+  const { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync } = sync;
+  const [confirmUndo, setConfirmUndo] = useState(false);
+  const busy = status.state === "running";
+  const tone = status.state === "ok" ? "text-green-700" : status.state === "error" ? "text-red-600" : status.state === "warn" || status.state === "needs-login" ? "text-amber-700" : "text-slate-500";
+  const fmt = (iso) => { try { return new Date(iso).toLocaleString("el-GR"); } catch (e) { return ""; } };
+  return (
+    <Card className="mb-4 border-2 border-teal-700">
+      <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mb-1 flex items-center gap-1.5">
+        <RotateCcw size={14} /> Συγχρονισμός συσκευών (Google Drive)
+      </p>
+      <p className="text-xs text-slate-500 mb-3">
+        Ό,τι καταχωρείς σε μία συσκευή (π.χ. μια καθαριότητα στον υπολογιστή) εμφανίζεται και στις άλλες, μέσα σε ένα λεπτό περίπου, όσο η εφαρμογή είναι ανοιχτή και συνδεδεμένη.
+        Χρησιμοποίησε τον ΙΔΙΟ λογαριασμό Google σε όλες τις συσκευές. Ο συγχρονισμός προσθέτει και ενημερώνει· δεν σβήνει καταγραφές. Τα στοιχεία (και του προσωπικού) αποθηκεύονται στο δικό σου Google Drive.
+      </p>
+      <Field label="Όνομα αυτής της συσκευής">
+        <input className={inputCls} value={device.name} maxLength={30} onChange={(e) => setDevice({ name: e.target.value })} placeholder="π.χ. Κινητό Γιώργου, Υπολογιστής μαγαζιού" />
+      </Field>
+      <Field label="Ρόλος αυτής της συσκευής">
+        <select className={inputCls} value={device.role} onChange={(e) => setDevice({ role: e.target.value })}>
+          <option value="master">Κύρια συσκευή (ό,τι λέει αυτή υπερισχύει σε διαφωνία)</option>
+          <option value="secondary">Δευτερεύουσα συσκευή</option>
+        </select>
+      </Field>
+      <p className="text-[11px] text-slate-400 -mt-1 mb-3">Όρισε ΜΙΑ μόνο κύρια συσκευή (το κινητό σου). Οι άλλες είναι δευτερεύουσες.</p>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {!device.enabled ? (
+          <button disabled={busy} onClick={enable} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold disabled:opacity-50">Ενεργοποίηση συγχρονισμού</button>
+        ) : (
+          <>
+            <button disabled={busy} onClick={syncNow} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold disabled:opacity-50">Συγχρονισμός τώρα</button>
+            <button disabled={busy} onClick={disable} className="px-3 py-2 rounded-lg border border-slate-300 text-sm">Απενεργοποίηση</button>
+          </>
+        )}
+      </div>
+      {status.msg && <p className={`text-xs font-semibold ${tone}`}>{status.msg}</p>}
+      {status.last && <p className="text-[11px] text-slate-400">Τελευταίος συγχρονισμός: {fmt(status.last)}</p>}
+      {device.enabled && (
+        <div className="mt-2 text-[11px] text-slate-500">
+          <div>Αυτή η συσκευή: <b>{device.name}</b> ({device.role === "master" ? "κύρια" : "δευτερεύουσα"})</div>
+          {(status.devices || []).map((d, i) => (
+            <div key={i}>Άλλη συσκευή: <b>{d.name}</b> ({d.role === "master" ? "κύρια" : "δευτερεύουσα"}){d.at ? ` — ${fmt(d.at)}` : ""}</div>
+          ))}
+        </div>
+      )}
+      {hasPreSync && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          {!confirmUndo ? (
+            <button onClick={() => setConfirmUndo(true)} className="text-xs px-2.5 py-1.5 rounded-lg border border-amber-400 text-amber-700 font-semibold">Επαναφορά πριν τον τελευταίο συγχρονισμό</button>
+          ) : (
+            <div className="text-xs">
+              <p className="mb-2 text-slate-600">Θα γυρίσουν τα δεδομένα αυτής της συσκευής όπως ήταν πριν την τελευταία ενημέρωση από άλλη συσκευή, και ο συγχρονισμός εδώ θα απενεργοποιηθεί (αλλιώς θα ξαναπεράσουν τα ίδια). Συνέχεια;</p>
+              <button onClick={() => { undoLast(); setConfirmUndo(false); }} className="px-2.5 py-1.5 rounded-lg bg-amber-600 text-white font-semibold mr-2">Ναι, επαναφορά</button>
+              <button onClick={() => setConfirmUndo(false)} className="px-2.5 py-1.5 rounded-lg border border-slate-300">Άκυρο</button>
+            </div>
+          )}
+        </div>
+      )}
+      <details className="mt-3 text-[11px] text-slate-500">
+        <summary className="cursor-pointer font-semibold">Πώς δουλεύει και τι πρέπει να ξέρεις</summary>
+        <ul className="list-disc ml-4 mt-1 space-y-1">
+          <li>Κάθε συσκευή ανεβάζει ΜΟΝΟ το δικό της αρχείο στο Google Drive σου (φάκελος GlenApps › Brewtopia) και διαβάζει των άλλων. Καμία δεν γράφει πάνω στο αρχείο άλλης.</li>
+          <li>Καταγραφές (θερμοκρασίες, καθαριότητα, λάδι), προσωπικό, εκπαιδεύσεις, αρχείο και επισκέψεις τεχνικού ΕΝΩΝΟΝΤΑΙ.</li>
+          <li>Ρυθμίσεις (ονόματα ψυγείων, περιοχές καθαριότητας κ.λπ.): κερδίζει η πιο πρόσφατη αλλαγή· αν είναι ισόπαλες, κερδίζει η κύρια συσκευή.</li>
+          <li>Ό,τι σβήνεις σε μία συσκευή (π.χ. έναν υπάλληλο) μπορεί να ξαναεμφανιστεί από άλλη. Αυτό γίνεται επίτηδες, για να μη χαθεί ποτέ τίποτα. Οι μήνες που διαγράφονται από τη «Διατήρηση Καταγραφών» δεν ξαναγυρίζουν.</li>
+          <li>Η διεύθυνση του ThermoServer και ο κωδικός διαχειριστή ΔΕΝ συγχρονίζονται (κάθε συσκευή έχει τα δικά της).</li>
+          <li>Πριν από κάθε αλλαγή από άλλη συσκευή κρατιέται αντίγραφο ασφαλείας του τι είχες· το κουμπί «Επαναφορά πριν τον τελευταίο συγχρονισμό» το επαναφέρει.</li>
+          <li>Η σύνδεση με Google λήγει κάθε ώρα και μετά από κάθε επανεκκίνηση του browser· τότε ο αυτόματος συγχρονισμός σταματά μέχρι να πατήσεις «Συγχρονισμός τώρα» (δεν χάνεται τίποτα, απλώς καθυστερεί).</li>
+          <li>Αν δύο συσκευές αλλάξουν ΤΟ ΙΔΙΟ κελί καταγραφής, κερδίζει η πιο πρόσφατη αλλαγή του συνόλου· για εγγραφές (προσωπικό, ψυγεία, περιοχές κ.λπ.) κερδίζει η πιο πρόσφατη αλλαγή της συγκεκριμένης εγγραφής.</li>
+        </ul>
+      </details>
+    </Card>
+  );
+}
+
 function App() {
   const [employees, setEmployees, empLoaded] = useStore("employees", []);
   const [sessions, setSessions] = useStore("training-sessions", []);
@@ -3482,6 +4046,11 @@ function App() {
     subTabLabels, displayItems, cleaningAreas, businessInfo, technicianVisits, safetyTechnician,
   ]);
 
+  // Συγχρονισμός συσκευών μέσω Google Drive (βλ. useDriveSync). Η εφαρμογή αλλαγών από άλλη συσκευή περνά από το importBackup.
+  const applyRef = useRef(null);
+  applyRef.current = (partial) => importBackup(partial);
+  const sync = useDriveSync({ applyRef, fallbackTextRef: getBackupTextRef, dataKey: backupDataKey });
+
   // Αποθήκευση στο φάκελο λίγα δευτερόλεπτα ΜΕΤΑ από κάθε αλλαγή δεδομένων (όχι μόνο ανά 10 λεπτά).
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.showDirectoryPicker !== "function") return;
@@ -3501,9 +4070,26 @@ function App() {
         if (emptyRef.current) return;
         const stamp = new Date().toISOString().slice(0, 10);
         const filename = `brewtopia-backup-${stamp}.json`;
+        const newText = getBackupTextRef.current();
+        let newCount = 0;
+        try { newCount = syncCount(JSON.parse(newText)); } catch {}
+        if (newCount === 0) return; // ποτέ αντίγραφο με 0 εγγραφές
         const fileHandle = await handle.getFileHandle(filename, { create: true });
+        // κανόνας «πριν»: αν το αρχείο της ημέρας έχει ΠΕΡΙΣΣΟΤΕΡΕΣ εγγραφές από το νέο, κρατάμε πρώτα αντίγραφο του παλιού.
+        // Αν το αντίγραφο αποτύχει, ΔΕΝ γράφουμε από πάνω (το σφάλμα φεύγει προς το εξωτερικό catch).
+        const oldText = await (await fileHandle.getFile()).text();
+        if (oldText) {
+          let oldCount = 0;
+          try { oldCount = syncCount(JSON.parse(oldText)); } catch { oldCount = 0; }
+          if (oldCount > newCount) {
+            const prinHandle = await handle.getFileHandle(`brewtopia-backup-${stamp}-prin-${Date.now()}.json`, { create: true });
+            const pw = await prinHandle.createWritable();
+            await pw.write(oldText);
+            await pw.close();
+          }
+        }
         const writable = await fileHandle.createWritable();
-        await writable.write(getBackupTextRef.current());
+        await writable.write(newText);
         await writable.close();
         try { localStorage.setItem("brewtopia-last-autobackup", new Date().toISOString()); } catch {}
       } catch {
@@ -3618,6 +4204,7 @@ function App() {
             adminCode={adminCode} setAdminCode={setAdminCode}
             safetyTechnician={safetyTechnician} setSafetyTechnician={setSafetyTechnician}
             thermoConfig={thermoConfig} setThermoConfig={setThermoConfig}
+            sync={sync}
           />
         )}
       </main>
