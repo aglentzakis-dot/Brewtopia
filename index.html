@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-19.5"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-19.6"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1696,12 +1696,18 @@ function SwipeRow({ children }) {
   );
 }
 
+// Όταν το πεδίο παίρνει εστίαση (π.χ. με «Επόμενο» στο πληκτρολόγιο), η λίστα ανεβαίνει ώστε το πεδίο να φαίνεται πάνω από το πληκτρολόγιο
+const focusCenter = (e) => {
+  const el = e.target;
+  setTimeout(() => { try { el.scrollIntoView({ block: "center", behavior: "smooth" }); } catch (err) {} }, 320);
+};
+
 function CashTab({ day, setField, clearAll }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const cv = (k) => (day[k] === CASH_CLEARED || day[k] === undefined || day[k] === null ? "" : day[k]);
   const qtyInput = (key) => (
     <input
-      type="text" inputMode="numeric" placeholder="0"
+      type="text" inputMode="numeric" enterKeyHint="next" placeholder="0" onFocus={focusCenter}
       className="w-20 border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
       value={cv(key)}
       onChange={(e) => setField(key, e.target.value.replace(/[^0-9]/g, ""))}
@@ -1741,7 +1747,7 @@ function CashTab({ day, setField, clearAll }) {
         <div key={k} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
           <span className="text-sm font-semibold text-slate-700">{label}</span>
           <input
-            type="text" inputMode="decimal" placeholder="0,00"
+            type="text" inputMode="decimal" enterKeyHint="next" placeholder="0,00" onFocus={focusCenter}
             className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
             value={cv(k)}
             onChange={(e) => setField(k, e.target.value.replace(/[^0-9,.]/g, ""))}
@@ -1756,7 +1762,7 @@ function CashTab({ day, setField, clearAll }) {
 
       <Field label="Σημειώσεις">
         <textarea
-          rows={3} className={inputCls} placeholder="Σημειώσεις βάρδιας…"
+          rows={3} className={inputCls} placeholder="Σημειώσεις βάρδιας…" onFocus={focusCenter}
           value={cv("notes")} onChange={(e) => setField("notes", e.target.value)}
         />
       </Field>
@@ -1776,6 +1782,7 @@ function CashTab({ day, setField, clearAll }) {
           </div>
         )}
       </div>
+      <div className="h-[35vh]" aria-hidden="true" />
     </Card>
   );
 }
