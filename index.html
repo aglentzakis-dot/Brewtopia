@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-19.3"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-19.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1667,6 +1667,7 @@ const CASH_OTHER = [
   ["pos1", "Κάρτες POS 1"], ["pos2", "Κάρτες POS 2"], ["efood", "efood"],
   ["wolt", "Wolt"], ["box", "Box"], ["delivery", "Delivery"],
 ];
+const BTN3D = "shadow-[0_3px_0_rgba(15,23,42,0.28)] active:translate-y-[2px] active:shadow-[0_1px_0_rgba(15,23,42,0.28)] transition-transform";
 const CASH_CLEARED = "∅"; // σήμα «διαγράφηκε» — ώστε η διαγραφή να περνά και στις άλλες συσκευές (το κενό δεν νικά ποτέ το γεμάτο)
 const cashNum = (v) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : 0; };
 const cashCents = (x) => Math.round(x * 100);
@@ -1699,16 +1700,21 @@ function CashTab({ day, setField, clearAll }) {
   const otherTotal = CASH_OTHER.reduce((a, [k]) => a + cashCents(cashNum(day[k])), 0);
   return (
     <Card>
-      <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mb-1">Χαρτονομίσματα (γράψε πόσα τεμάχια)</p>
-      {CASH_NOTES.map(row)}
-      <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mt-4 mb-1">Κέρματα (γράψε πόσα τεμάχια)</p>
-      {CASH_COINS.map(row)}
-      <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2 rounded-lg bg-slate-800 text-white">
+      <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 mb-3 shadow-sm">
+        <p className="text-xs font-bold uppercase tracking-wide text-emerald-800 mb-1">💶 Χαρτονομίσματα (γράψε πόσα τεμάχια)</p>
+        {CASH_NOTES.map(row)}
+      </div>
+      <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 shadow-sm">
+        <p className="text-xs font-bold uppercase tracking-wide text-amber-800 mb-1">🪙 Κέρματα (γράψε πόσα τεμάχια)</p>
+        {CASH_COINS.map(row)}
+      </div>
+      <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2.5 rounded-xl bg-gradient-to-b from-emerald-600 to-emerald-800 text-white shadow-[0_3px_0_rgba(6,78,59,0.55)]">
         <span className="text-sm font-bold">Σύνολο μετρητών</span>
         <span className="text-base font-extrabold">{cashFmt(cashTotal)}</span>
       </div>
 
-      <p className="text-xs font-bold uppercase tracking-wide text-teal-800 mb-1">Κάρτες και πλατφόρμες (γράψε το ποσό σε €)</p>
+      <div className="rounded-xl bg-sky-50 border border-sky-200 p-3 shadow-sm">
+      <p className="text-xs font-bold uppercase tracking-wide text-sky-800 mb-1">💳 Κάρτες και πλατφόρμες (γράψε το ποσό σε €)</p>
       {CASH_OTHER.map(([k, label]) => (
         <div key={k} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100">
           <span className="text-sm font-semibold text-slate-700">{label}</span>
@@ -1720,7 +1726,8 @@ function CashTab({ day, setField, clearAll }) {
           />
         </div>
       ))}
-      <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2 rounded-lg bg-slate-800 text-white">
+      </div>
+      <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2.5 rounded-xl bg-gradient-to-b from-sky-600 to-sky-800 text-white shadow-[0_3px_0_rgba(7,89,133,0.55)]">
         <span className="text-sm font-bold">Σύνολο καρτών</span>
         <span className="text-base font-extrabold">{cashFmt(otherTotal)}</span>
       </div>
@@ -1734,7 +1741,7 @@ function CashTab({ day, setField, clearAll }) {
 
       <div className="mt-4 pt-4 border-t border-slate-200">
         {!confirmDel ? (
-          <button onClick={() => setConfirmDel(true)} className="w-full py-2.5 rounded-lg bg-red-600 text-white text-sm font-bold">
+          <button onClick={() => setConfirmDel(true)} className={`w-full py-2.5 rounded-xl bg-gradient-to-b from-red-500 to-red-700 text-white text-sm font-bold ${BTN3D}`}>
             Διαγραφή αυτής της λίστας
           </button>
         ) : (
@@ -2126,7 +2133,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       )}
 
       <Card className="mb-4">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-1">
           <Field label="Ημερομηνία">
             <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
           </Field>
@@ -2138,10 +2145,10 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                   <button
                     key={s}
                     onClick={() => selectShift(s)}
-                    className={`flex-1 py-2 rounded-lg text-xs font-bold border-2 transition-all ${
+                    className={`flex-1 min-w-0 py-2 px-1 rounded-xl text-[11px] font-bold border-2 truncate ${BTN3D} ${
                       lit
-                        ? "bg-amber-400 border-amber-500 text-slate-900 shadow-[0_0_0_3px_rgba(251,191,36,0.35)]"
-                        : "border-slate-300 text-slate-500 bg-white"
+                        ? "bg-gradient-to-b from-amber-300 to-amber-400 border-amber-500 text-slate-900"
+                        : "border-slate-300 text-slate-500 bg-gradient-to-b from-white to-slate-100"
                     }`}
                   >{shiftNames[s] || s}</button>
                 );
@@ -2172,13 +2179,13 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         )}
       </Card>
 
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+      <div className="flex flex-wrap gap-2 mb-4">
         {subTabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setSub(t.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap border ${
-              sub === t.id ? "bg-slate-800 text-white border-slate-800" : "border-slate-300 text-slate-600"
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${BTN3D} ${
+              sub === t.id ? "bg-gradient-to-b from-slate-700 to-slate-900 text-white border-slate-900" : "border-slate-300 text-slate-600 bg-gradient-to-b from-white to-slate-100"
             }`}
           >
             <t.icon size={13} /> {t.label}
@@ -3745,7 +3752,7 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
     if (tokenRef.current && tokenRef.current.exp > Date.now() + 60000) return resolve(tokenRef.current.value);
     syncLoadGis().then(() => {
       let done = false;
-      const timer = setTimeout(() => { if (!done) { done = true; reject(Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true })); } }, interactive ? 120000 : 15000);
+      const timer = setTimeout(() => { if (!done) { done = true; reject(Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true })); } }, interactive ? 90000 : 15000);
       const finish = (fn, v) => { if (done) return; done = true; clearTimeout(timer); fn(v); };
       const client = window.google.accounts.oauth2.initTokenClient({
         client_id: SYNC_CLIENT_ID,
@@ -3758,7 +3765,13 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
             finish(reject, Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true }));
           }
         },
-        error_callback: () => finish(reject, Object.assign(new Error("Η σύνδεση με Google ακυρώθηκε ή μπλοκαρίστηκε."), { needsLogin: true })),
+        error_callback: (err) => {
+          const t = err && err.type;
+          const msg = t === "popup_failed_to_open" ? "Ο browser μπλόκαρε το παράθυρο σύνδεσης Google — επίτρεψε τα αναδυόμενα παράθυρα για αυτή τη σελίδα και ξαναπάτα."
+            : t === "popup_closed" ? "Το παράθυρο σύνδεσης Google έκλεισε πριν ολοκληρωθεί — ξαναπάτα και ολοκλήρωσε τη σύνδεση."
+            : "Η σύνδεση με Google ακυρώθηκε ή μπλοκαρίστηκε" + (t ? " (" + t + ")" : "") + ".";
+          finish(reject, Object.assign(new Error(msg), { needsLogin: true }));
+        },
       });
       client.requestAccessToken({ prompt: interactive ? (SYNC_LS.get("brewtopia-sync-consented", false) ? "" : "consent") : "none" });
     }).catch(reject);
@@ -3768,7 +3781,7 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
     if (lockRef.current) return;
     if (!interactive && (!deviceRef.current.enabled || needsLoginRef.current)) return;
     lockRef.current = true;
-    setStatus((s) => ({ ...s, state: "running", msg: "Συγχρονισμός…" }));
+    setStatus((s) => ({ ...s, state: "running", msg: interactive ? "Περιμένω τη σύνδεση Google — ολοκλήρωσε την επιλογή λογαριασμού στο παράθυρο που άνοιξε (αν δεν φαίνεται, ξαναπάτα το κουμπί)…" : "Συγχρονισμός…" }));
     try {
       const dev = deviceRef.current;
       const token = await getToken(interactive);
