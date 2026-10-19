@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-19.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-19.5"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1674,6 +1674,28 @@ const cashCents = (x) => Math.round(x * 100);
 const cashFmt = (cents) => (cents / 100).toLocaleString("el-GR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 const cashDenomLabel = (d) => (d >= 5 ? `${d} €` : `${String(d).replace(".", ",")} €`);
 
+function SwipeRow({ children }) {
+  const ref = useRef(null);
+  const [th, setTh] = useState({ left: 0, width: 100 });
+  const update = () => {
+    const el = ref.current;
+    if (!el) return;
+    const w = (el.clientWidth / el.scrollWidth) * 100;
+    const l = el.scrollWidth > el.clientWidth ? (el.scrollLeft / el.scrollWidth) * 100 : 0;
+    setTh({ left: l, width: Math.min(100, w) });
+  };
+  useEffect(() => { update(); window.addEventListener("resize", update); return () => window.removeEventListener("resize", update); }, []);
+  return (
+    <div className="mb-4">
+      <div ref={ref} onScroll={update} className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{children}</div>
+      <div className="relative h-1.5 rounded-full bg-slate-200">
+        <div className="absolute top-0 h-1.5 rounded-full bg-teal-600" style={{ left: th.left + "%", width: th.width + "%" }} />
+      </div>
+      <p className="text-[10px] text-slate-400 text-center mt-1">↔ σύρε αριστερά–δεξιά για περισσότερες επιλογές</p>
+    </div>
+  );
+}
+
 function CashTab({ day, setField, clearAll }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const cv = (k) => (day[k] === CASH_CLEARED || day[k] === undefined || day[k] === null ? "" : day[k]);
@@ -1689,7 +1711,7 @@ function CashTab({ day, setField, clearAll }) {
     const key = "d" + String(d).replace(".", "_");
     const lineCents = cashCents(cashNum(day[key]) * d);
     return (
-      <div key={key} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100">
+      <div key={key} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
         <span className="text-sm font-semibold text-slate-700 w-20">{cashDenomLabel(d)}</span>
         <span className="text-[11px] text-slate-400 flex-1 text-right">{lineCents > 0 ? cashFmt(lineCents) : ""}</span>
         {qtyInput(key)}
@@ -1716,7 +1738,7 @@ function CashTab({ day, setField, clearAll }) {
       <div className="rounded-xl bg-sky-50 border border-sky-200 p-3 shadow-sm">
       <p className="text-xs font-bold uppercase tracking-wide text-sky-800 mb-1">💳 Κάρτες και πλατφόρμες (γράψε το ποσό σε €)</p>
       {CASH_OTHER.map(([k, label]) => (
-        <div key={k} className="flex items-center justify-between gap-2 py-1 border-b border-slate-100">
+        <div key={k} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
           <span className="text-sm font-semibold text-slate-700">{label}</span>
           <input
             type="text" inputMode="decimal" placeholder="0,00"
@@ -1760,7 +1782,7 @@ function CashTab({ day, setField, clearAll }) {
 
 function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, cashData, setCashData, cleanExtra, setCleanExtra, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo, thermoConfig }) {
   const [date, setDate] = useState(todayISO());
-  const [shift, setShift] = useState("Α");
+  const [shift, setShift] = useState(() => { try { return getActiveShift(new Date()); } catch (e) { return "Α"; } });
   const [sub, setSub] = useState("temps");
   const [editingSubTabs, setEditingSubTabs] = useState(false);
   const [editingStations, setEditingStations] = useState(false);
@@ -1794,6 +1816,12 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       setWrongShiftWarning(null);
     }
   };
+
+  // Η προειδοποίηση λάθος βάρδιας εμφανίζεται κάθε φορά που η επιλεγμένη βάρδια δεν είναι αυτή που τρέχει (και όταν αλλάζεις καρτέλα/ημέρα)
+  useEffect(() => {
+    setWrongShiftWarning(date === todayKey && shift !== activeShift ? shift : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub, shift, date, activeShift]);
 
   const moveStation = (idx, dir) => {
     const next = [...stations];
@@ -2179,19 +2207,19 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         )}
       </Card>
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      <SwipeRow>
         {subTabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setSub(t.id)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border ${BTN3D} ${
+            className={`shrink-0 snap-start w-[calc(50%-0.25rem)] justify-center flex items-center gap-1.5 px-2 py-2 rounded-full text-[11px] font-semibold border whitespace-nowrap ${BTN3D} ${
               sub === t.id ? "bg-gradient-to-b from-slate-700 to-slate-900 text-white border-slate-900" : "border-slate-300 text-slate-600 bg-gradient-to-b from-white to-slate-100"
             }`}
           >
             <t.icon size={13} /> {t.label}
           </button>
         ))}
-      </div>
+      </SwipeRow>
 
       {sub === "temps" && (
         <Card>
