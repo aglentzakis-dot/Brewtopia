@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-20.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-20.5"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -166,10 +166,31 @@ async function idbSetBrewtopia(key, value) {
   });
 }
 
-// Cloudflare Access — στοιχεία σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
-// Συμπλήρωσε εδώ τα πραγματικά Client ID / Client Secret πριν ανεβάσεις το αρχείο.
-const CF_ACCESS_CLIENT_ID = "037d1d4acf5679e24fc69fbdaa10ae40.access";
-const CF_ACCESS_CLIENT_SECRET = "cfast_Vfr5vzBcOwqYJEzb6IkhJ5c26il6N8Dgu9UepMLB059fbd1b";
+// Cloudflare Access — κλειδί σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
+// ΑΣΦΑΛΕΙΑ: το κλειδί ΔΕΝ γράφεται ποτέ μέσα στον κώδικα (ο κώδικας είναι δημόσιος στο GitHub).
+// Το περνάει ο χρήστης μία φορά σε κάθε συσκευή (Αρχείο → ThermoServer) και μένει ΜΟΝΟ σε αυτή τη συσκευή,
+// σε ξεχωριστό κλειδί αποθήκευσης που δεν μπαίνει ποτέ σε αντίγραφα, συγχρονισμό ή εξαγωγές.
+const THERMO_DEFAULT_URL = "https://thermo.glenapps.gr";
+const THERMO_KEY_STORAGE = "brewtopia-local-only:thermo-access-key";
+function readThermoKey() {
+  try {
+    const k = JSON.parse(window.localStorage.getItem(THERMO_KEY_STORAGE) || "null");
+    return k && k.id && k.secret ? k : null;
+  } catch (e) { return null; }
+}
+function writeThermoKey(k) {
+  try {
+    if (k && k.id && k.secret) window.localStorage.setItem(THERMO_KEY_STORAGE, JSON.stringify({ id: k.id.trim(), secret: k.secret.trim() }));
+    else window.localStorage.removeItem(THERMO_KEY_STORAGE);
+  } catch (e) {}
+}
+// Κάθε αίτημα προς το ThermoServer περνάει από εδώ: βάζει αυτόματα το κλειδί της συσκευής.
+function thermoRequest(baseUrl, path) {
+  const key = readThermoKey();
+  if (!key) { const e = new Error("no-key"); e.noKey = true; return Promise.reject(e); }
+  const u = (baseUrl || "").replace(/\/$/, "");
+  return fetch(`${u}${path}`, { headers: { "CF-Access-Client-Id": key.id, "CF-Access-Client-Secret": key.secret }, cache: "no-store" });
+}
 
 const SHIFTS = ["Α", "Β", "Γ"];
 
@@ -2106,14 +2127,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     return withProto.replace(/\/$/, "");
   };
 
-  // Κάθε αίτημα προς το ThermoServer περνάει από εδώ, ώστε τα Cloudflare Access
-  // headers να μπαίνουν πάντα αυτόματα, χωρίς επανάληψη σε κάθε fetch.
-  const thermoFetch = (path) => fetch(`${thermoUrl()}${path}`, {
-    headers: {
-      "CF-Access-Client-Id": CF_ACCESS_CLIENT_ID,
-      "CF-Access-Client-Secret": CF_ACCESS_CLIENT_SECRET,
-    },
-  });
+  const thermoFetch = (path) => thermoRequest(thermoUrl(), path);
 
   const fetchThermoDevices = async () => {
     if (!thermoConfig?.baseUrl) return;
@@ -2173,6 +2187,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       else if (!anyMapped) setThermoStatus("no-sensors");
       else setThermoStatus("no-match");
     } catch (e) {
+      if (e && e.noKey) { setThermoStatus("no-key"); return; }
       if (e && e.message === "http") { setThermoStatus("error-http"); return; }
       // Διάγνωση: αίτημα χωρίς ειδικές κεφαλίδες (no-cors). Αν ο διακομιστής απαντά, φταίει ο αποκλεισμός CORS/Access· αλλιώς δεν βρίσκεται καθόλου.
       try {
@@ -2397,8 +2412,11 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
               {thermoStatus === "error" && (
                 <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε τη διεύθυνση ή το δίκτυο.</p>
               )}
+              {thermoStatus === "no-key" && (
+                <p className="text-[11px] text-red-600 mt-1">Δεν έχει οριστεί κλειδί ThermoServer σε αυτή τη συσκευή. Πήγαινε στο Αρχείο → ThermoServer → «Επεξεργασία» και πέρασε το κλειδί. Μέχρι τότε, οι θερμοκρασίες μπαίνουν με το χέρι.</p>
+              )}
               {thermoStatus === "error-blocked" && (
-                <p className="text-[11px] text-red-600 mt-1">Ο διακομιστής ανταποκρίνεται, αλλά το Cloudflare Access μπλοκάρει το αίτημα από αυτή τη σελίδα (ρύθμιση CORS). Χρειάζεται αλλαγή στο Cloudflare — όχι στο δίκτυο ή στη διεύθυνση.</p>
+                <p className="text-[11px] text-red-600 mt-1">Ο διακομιστής ανταποκρίνεται, αλλά το Cloudflare αρνείται το αίτημα. Συνήθως σημαίνει λάθος ή παλιό κλειδί σε αυτή τη συσκευή (Αρχείο → ThermoServer → «Δοκιμή σύνδεσης»).</p>
               )}
               {thermoStatus === "error-unreachable" && (
                 <p className="text-[11px] text-red-600 mt-1">Δεν βρέθηκε ο διακομιστής. Έλεγξε ότι έχεις internet, ότι το PC του μαγαζιού είναι ανοιχτό και ότι τρέχει το Cloudflare Tunnel.</p>
@@ -3340,7 +3358,41 @@ const TECHNICIAN_ACTIONS = [
 function ThermoServerPanel({ config, setConfig }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(config);
-  const save = () => { setConfig(draft); setEditing(false); };
+  const [hasKey, setHasKey] = useState(() => !!readThermoKey());
+  const [keyId, setKeyId] = useState("");
+  const [keySecret, setKeySecret] = useState("");
+  const [test, setTest] = useState(null); // null | "loading" | "ok" | μήνυμα σφάλματος
+
+  const startEdit = () => { setDraft(config); setKeyId(""); setKeySecret(""); setTest(null); setEditing(true); };
+  const save = () => {
+    setConfig({ ...draft, baseUrl: (draft.baseUrl || "").trim() });
+    if (keyId.trim() && keySecret.trim()) { writeThermoKey({ id: keyId, secret: keySecret }); setHasKey(true); }
+    setKeyId(""); setKeySecret("");
+    setEditing(false);
+  };
+  const removeKey = () => {
+    if (!window.confirm("Να σβηστεί το κλειδί ThermoServer από αυτή τη συσκευή;")) return;
+    writeThermoKey(null); setHasKey(false); setTest(null);
+  };
+  const runTest = async () => {
+    setTest("loading");
+    const base = ((editing ? draft.baseUrl : config.baseUrl) || "").trim().replace(/\/$/, "");
+    if (!/^https:\/\//i.test(base)) { setTest("Η διεύθυνση πρέπει να ξεκινά με https://"); return; }
+    if (editing && keyId.trim() && keySecret.trim()) writeThermoKey({ id: keyId, secret: keySecret });
+    if (editing && keyId.trim() && keySecret.trim()) setHasKey(true);
+    try {
+      const res = await thermoRequest(base, "/api/devices");
+      if (res.ok) { setTest("ok"); return; }
+      setTest(res.status === 403 ? "Το Cloudflare αρνήθηκε το κλειδί (403) — έλεγξε ότι αντιγράφηκε σωστά." : `Ο διακομιστής απάντησε με σφάλμα (κωδικός ${res.status}).`);
+    } catch (e) {
+      if (e && e.noKey) { setTest("Δεν έχει οριστεί κλειδί σε αυτή τη συσκευή."); return; }
+      setTest("Δεν έγινε σύνδεση — λάθος κλειδί, ή ο υπολογιστής του μαγαζιού / το τούνελ δεν τρέχει.");
+    }
+  };
+
+  const testMsg = test === "loading" ? <p className="text-[11px] text-slate-500">Δοκιμή…</p>
+    : test === "ok" ? <p className="text-[11px] text-teal-700 font-semibold">✓ Η σύνδεση με το ThermoServer λειτουργεί.</p>
+    : test ? <p className="text-[11px] text-red-600">{test}</p> : null;
 
   return (
     <Card className="mb-4">
@@ -3348,32 +3400,47 @@ function ThermoServerPanel({ config, setConfig }) {
         <Droplet size={14} /> ThermoServer (αυτόματες θερμοκρασίες)
       </p>
       <p className="text-xs text-slate-500 mb-2">
-        Σύνδεση με το τοπικό σύστημα Zigbee αισθητήρων στο PC του καταστήματος (μόνο μέσα στο ίδιο WiFi).
+        Σύνδεση με το σύστημα αισθητήρων Zigbee στον υπολογιστή του καταστήματος, μέσω ασφαλούς σύνδεσης Cloudflare.
+        Το κλειδί μένει μόνο σε αυτή τη συσκευή — δεν μπαίνει σε αντίγραφα, συγχρονισμό ή εξαγωγές.
       </p>
       {!editing ? (
         <>
-          <p className="text-xs text-slate-600 mb-2">
+          <p className="text-xs text-slate-600 mb-1">
             Διεύθυνση: <b>{config.baseUrl || "— δεν έχει οριστεί —"}</b>
             {" · "}
             {config.enabled ? <span className="text-teal-700 font-semibold">ενεργό</span> : <span className="text-slate-400">ανενεργό</span>}
           </p>
-          <button onClick={() => { setDraft(config); setEditing(true); }} className="text-[11px] text-teal-700 underline">
-            Επεξεργασία
-          </button>
+          <p className="text-xs text-slate-600 mb-2">
+            Κλειδί σε αυτή τη συσκευή: {hasKey ? <b className="text-teal-700">έχει οριστεί ••••••••</b> : <b className="text-red-600">Δεν έχει οριστεί κλειδί ThermoServer</b>}
+          </p>
+          <div className="flex flex-wrap gap-3 items-center mb-1">
+            <button onClick={startEdit} className="text-[11px] text-teal-700 underline">Επεξεργασία</button>
+            {hasKey && <button onClick={runTest} className="text-[11px] text-teal-700 underline">Δοκιμή σύνδεσης</button>}
+            {hasKey && <button onClick={removeKey} className="text-[11px] text-red-600 underline">Διαγραφή κλειδιού</button>}
+          </div>
+          {testMsg}
         </>
       ) : (
         <div className="space-y-2">
-          <Field label="Διεύθυνση PC (IP:πόρτα)">
-            <input className={inputCls} placeholder="π.χ. 192.168.1.50:3000" value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} />
+          <Field label="Διεύθυνση ThermoServer">
+            <input className={inputCls} placeholder={THERMO_DEFAULT_URL} value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} />
+          </Field>
+          <Field label={hasKey ? "Αναγνωριστικό (άφησέ το κενό για να μείνει το τωρινό κλειδί)" : "Αναγνωριστικό"}>
+            <input className={inputCls} type="password" autoComplete="off" spellCheck={false} placeholder="……….access" value={keyId} onChange={(e) => setKeyId(e.target.value)} />
+          </Field>
+          <Field label="Μυστικό κλειδί">
+            <input className={inputCls} type="password" autoComplete="new-password" spellCheck={false} value={keySecret} onChange={(e) => setKeySecret(e.target.value)} />
           </Field>
           <label className="flex items-center gap-2 text-sm text-slate-700">
             <input type="checkbox" className="w-4 h-4 accent-teal-700" checked={!!draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
             Ενεργοποίηση αυτόματων θερμοκρασιών
           </label>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
-            <button onClick={() => setEditing(false)} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
+            <button onClick={runTest} className="border border-teal-700 text-teal-700 px-4 py-2 rounded-lg text-sm">Δοκιμή σύνδεσης</button>
+            <button onClick={() => { setKeyId(""); setKeySecret(""); setEditing(false); }} className="border border-slate-300 px-4 py-2 rounded-lg text-sm">Άκυρο</button>
           </div>
+          {testMsg}
         </div>
       )}
     </Card>
@@ -4312,13 +4379,14 @@ function App() {
 
   const [records, setRecords] = useStore("archive-records", []);
   const [businessInfo, setBusinessInfo] = useStore("business-info", DEFAULT_BUSINESS_INFO);
-  const [thermoConfig, setThermoConfig] = useStore("thermo-config", { baseUrl: "https://thermo.brewtopia-thermo.com", enabled: true });
+  const [thermoConfig, setThermoConfig] = useStore("thermo-config", { baseUrl: THERMO_DEFAULT_URL, enabled: true });
   // Μετάβαση: παλιά αποθηκευμένη διεύθυνση τύπου http://IP:3000 δεν δουλεύει ποτέ από τη σελίδα https (αποκλείεται από τον browser)
   // → αντικαθίσταται αυτόματα με την ασφαλή διεύθυνση του ThermoServer.
   useEffect(() => {
     const u = (thermoConfig && thermoConfig.baseUrl) || "";
-    if (!u || /^http:\/\//i.test(u)) {
-      setThermoConfig({ ...(thermoConfig || {}), baseUrl: "https://thermo.brewtopia-thermo.com", enabled: true });
+    // Η παλιά διεύθυνση (thermo.brewtopia-thermo.com) ανήκει σε λογαριασμό Cloudflare που χάθηκε → μεταφορά στη νέα.
+    if (!u || /^http:\/\//i.test(u) || /brewtopia-thermo\.com/i.test(u)) {
+      setThermoConfig({ ...(thermoConfig || {}), baseUrl: THERMO_DEFAULT_URL, enabled: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
