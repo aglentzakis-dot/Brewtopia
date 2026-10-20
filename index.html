@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-20.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-20.3"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -420,6 +420,7 @@ const SYNC_DATA_KEYS = {
   oilData: ["oil-logs", "log"],
   cashData: ["cash-logs", "log"],
   cleanExtra: ["cleaning-extra", "log"],
+  cashPlatforms: ["cash-platforms", "set"],
   sensorMap: ["sensor-map", "log"],
   stations: ["fridge-stations", "list"],
   shiftNames: ["shift-names", "set"],
@@ -1667,6 +1668,10 @@ const CASH_OTHER = [
   ["pos1", "Κάρτες POS 1"], ["pos2", "Κάρτες POS 2"], ["efood", "efood"],
   ["wolt", "Wolt"], ["box", "Box"], ["delivery", "Delivery"],
 ];
+// Υπηρεσίες/πλατφόρμες του ταμείου (επεξεργάσιμη λίστα). Το id είναι και το κλειδί των τιμών στο cashData — τα 4 πρώτα κρατούν τα παλιά κλειδιά.
+const CASH_PLATFORMS_DEFAULT = { items: [
+  { id: "efood", name: "efood" }, { id: "wolt", name: "Wolt" }, { id: "box", name: "Box" }, { id: "delivery", name: "Delivery" },
+] };
 const BTN3D = "shadow-[0_3px_0_rgba(15,23,42,0.28)] active:translate-y-[2px] active:shadow-[0_1px_0_rgba(15,23,42,0.28)] transition-transform";
 const CASH_CLEARED = "∅"; // σήμα «διαγράφηκε» — ώστε η διαγραφή να περνά και στις άλλες συσκευές (το κενό δεν νικά ποτέ το γεμάτο)
 const cashNum = (v) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : 0; };
@@ -1676,6 +1681,8 @@ const cashDenomLabel = (d) => (d >= 5 ? `${d} €` : `${String(d).replace(".", "
 
 function SwipeRow({ children }) {
   const ref = useRef(null);
+  const drag = useRef({ on: false, x: 0, l: 0, moved: false });
+  const [dragging, setDragging] = useState(false);
   const [th, setTh] = useState({ left: 0, width: 100 });
   const update = () => {
     const el = ref.current;
@@ -1685,13 +1692,46 @@ function SwipeRow({ children }) {
     setTh({ left: l, width: Math.min(100, w) });
   };
   useEffect(() => { update(); window.addEventListener("resize", update); return () => window.removeEventListener("resize", update); }, []);
+  // Ποντίκι (υπολογιστής): σύρσιμο με πατημένο αριστερό κουμπί
+  useEffect(() => {
+    const mv = (e) => {
+      const d = drag.current;
+      if (!d.on || !ref.current) return;
+      const dx = e.clientX - d.x;
+      if (!d.moved && Math.abs(dx) > 5) { d.moved = true; setDragging(true); }
+      if (d.moved) { ref.current.scrollLeft = d.l - dx; e.preventDefault(); }
+    };
+    const up = () => {
+      const d = drag.current;
+      if (!d.on) return;
+      d.on = false;
+      if (d.moved) { setDragging(false); setTimeout(() => { d.moved = false; }, 60); }
+    };
+    window.addEventListener("mousemove", mv);
+    window.addEventListener("mouseup", up);
+    return () => { window.removeEventListener("mousemove", mv); window.removeEventListener("mouseup", up); };
+  }, []);
+  const onMouseDown = (e) => {
+    if (e.button !== 0 || !ref.current) return;
+    drag.current = { on: true, x: e.clientX, l: ref.current.scrollLeft, moved: false };
+  };
+  const onClickCapture = (e) => { if (drag.current.moved) { e.preventDefault(); e.stopPropagation(); } };
+  const step = (dir) => { const el = ref.current; if (el) el.scrollBy({ left: dir * el.clientWidth * 0.5, behavior: "smooth" }); };
+  const arrowCls = `shrink-0 w-8 h-8 rounded-full border border-slate-300 bg-gradient-to-b from-white to-slate-100 text-slate-700 text-lg font-bold leading-none flex items-center justify-center ${BTN3D}`;
   return (
     <div className="mb-4">
-      <div ref={ref} onScroll={update} className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{children}</div>
-      <div className="relative h-1.5 rounded-full bg-slate-200">
-        <div className="absolute top-0 h-1.5 rounded-full bg-teal-600" style={{ left: th.left + "%", width: th.width + "%" }} />
+      <div
+        ref={ref} onScroll={update} onMouseDown={onMouseDown} onClickCapture={onClickCapture}
+        className={`flex gap-2 overflow-x-auto pb-2 select-none ${dragging ? "cursor-grabbing" : "cursor-grab snap-x snap-mandatory"} [scrollbar-width:none] [&::-webkit-scrollbar]:hidden`}
+      >{children}</div>
+      <div className="flex items-center gap-2 mt-1">
+        <button type="button" aria-label="Προηγούμενες επιλογές" onClick={() => step(-1)} className={arrowCls}>‹</button>
+        <div className="relative h-1.5 rounded-full bg-slate-200 flex-1">
+          <div className="absolute top-0 h-1.5 rounded-full bg-teal-600" style={{ left: th.left + "%", width: th.width + "%" }} />
+        </div>
+        <button type="button" aria-label="Επόμενες επιλογές" onClick={() => step(1)} className={arrowCls}>›</button>
       </div>
-      <p className="text-[10px] text-slate-400 text-center mt-1">↔ σύρε αριστερά–δεξιά για περισσότερες επιλογές</p>
+      <p className="text-[10px] text-slate-400 text-center mt-1">↔ σύρε (δάχτυλο ή ποντίκι) ή πάτα τα βελάκια για περισσότερες επιλογές</p>
     </div>
   );
 }
@@ -1709,8 +1749,24 @@ const focusCenter = (e) => {
   }, 350);
 };
 
-function CashTab({ day, setField, clearAll }) {
+function CashTab({ day, setField, clearAll, platforms, setPlatforms }) {
   const [confirmDel, setConfirmDel] = useState(false);
+  const [editPl, setEditPl] = useState(false);
+  const [newPl, setNewPl] = useState("");
+  const plAll = Array.isArray(platforms?.items) ? platforms.items.filter((x) => x && x.id) : CASH_PLATFORMS_DEFAULT.items;
+  const hasVal = (id) => day[id] !== undefined && day[id] !== null && day[id] !== "" && day[id] !== CASH_CLEARED;
+  // εμφανίζονται οι ενεργές υπηρεσίες + όσες έχουν αφαιρεθεί αλλά έχουν τιμή αυτή τη βάρδια (δεν χάνεται ποτέ καταχώρηση)
+  const plShown = plAll.filter((x) => !x.hidden || hasVal(x.id));
+  const writePl = (items) => setPlatforms({ items });
+  const plMove = (i, dir) => { const j = i + dir; if (j < 0 || j >= plAll.length) return; const c = plAll.slice(); [c[i], c[j]] = [c[j], c[i]]; writePl(c); };
+  const plRename = (id, name) => writePl(plAll.map((x) => (x.id === id ? { ...x, name } : x)));
+  const plHide = (id, hidden) => writePl(plAll.map((x) => (x.id === id ? { ...x, hidden } : x)));
+  const plAdd = () => {
+    const t = newPl.trim();
+    if (!t) return;
+    writePl([...plAll, { id: "p_" + uid(), name: t }]);
+    setNewPl("");
+  };
   const cv = (k) => (day[k] === CASH_CLEARED || day[k] === undefined || day[k] === null ? "" : day[k]);
   const qtyInput = (key) => (
     <input
@@ -1734,7 +1790,7 @@ function CashTab({ day, setField, clearAll }) {
   const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashNum(day["d" + String(d).replace(".", "_")]) * d), 0);
   const CARD_KEYS = ["pos1", "pos2"];
   const cardTotal = CARD_KEYS.reduce((a, k) => a + cashCents(cashNum(day[k])), 0);
-  const platformTotal = ["efood", "wolt", "box", "delivery"].reduce((a, k) => a + cashCents(cashNum(day[k])), 0);
+  const platformTotal = plShown.reduce((a, x) => a + cashCents(cashNum(day[x.id])), 0);
   const invoiceCents = cashCents(cashNum(day.invoices));
   const turnover = cashTotal + invoiceCents + cardTotal;      // τζίρος ταμείου: μετρητά + τιμολόγια + κάρτες
   const grandTotal = turnover + platformTotal;                 // + efood, Wolt, Box, Delivery
@@ -1742,7 +1798,7 @@ function CashTab({ day, setField, clearAll }) {
   const invOpen = showInv || invoiceCents > 0;
   const moneyRow = ([k, label]) => (
     <div key={k} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
-      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">{label}</span>
       <input
         type="text" inputMode="decimal" enterKeyHint="next" placeholder="0,00" onFocus={focusCenter}
         className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-base text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
@@ -1751,7 +1807,6 @@ function CashTab({ day, setField, clearAll }) {
       />
     </div>
   );
-  const OTHER_PLATFORMS = CASH_OTHER.filter(([k]) => !CARD_KEYS.includes(k));
   return (
     <Card>
       <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 mb-3 shadow-sm">
@@ -1777,8 +1832,43 @@ function CashTab({ day, setField, clearAll }) {
       </div>
 
       <div className="rounded-xl bg-violet-50 border border-violet-200 p-3 shadow-sm mb-5">
-        <p className="text-xs font-bold uppercase tracking-wide text-violet-800 mb-1">🛵 Πλατφόρμες (γράψε το ποσό σε €)</p>
-        {OTHER_PLATFORMS.map(moneyRow)}
+        <div className="flex items-center justify-between mb-1 gap-2">
+          <p className="text-xs font-bold uppercase tracking-wide text-violet-800">🛵 Πλατφόρμες (γράψε το ποσό σε €)</p>
+          <button
+            onClick={() => setEditPl((v) => !v)}
+            className={`shrink-0 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${BTN3D} ${editPl ? "bg-violet-700 text-white border-violet-800" : "bg-white text-violet-800 border-violet-300"}`}
+          >{editPl ? "✓ Τέλος" : "✏️ Επεξεργασία"}</button>
+        </div>
+        {!editPl && plShown.length === 0 && <p className="text-xs text-slate-500 py-2">Δεν υπάρχει υπηρεσία. Πάτα «Επεξεργασία» για να προσθέσεις.</p>}
+        {!editPl && plShown.map((x) => moneyRow([x.id, x.name || "(χωρίς όνομα)"]))}
+        {editPl && (
+          <div className="mt-2 space-y-2">
+            <p className="text-[11px] text-slate-500">Άλλαξε όνομα, σειρά (βελάκια) ή αφαίρεσε. Οι παλιές καταχωρήσεις διατηρούνται πάντα.</p>
+            {plAll.map((x, i) => (
+              <div key={x.id} className={`flex items-center gap-1.5 ${x.hidden ? "opacity-50" : ""}`}>
+                <button onClick={() => plMove(i, -1)} disabled={i === 0} aria-label="Πάνω" className={`w-8 h-8 rounded-lg border border-slate-300 bg-white text-sm disabled:opacity-30 ${BTN3D}`}>↑</button>
+                <button onClick={() => plMove(i, 1)} disabled={i === plAll.length - 1} aria-label="Κάτω" className={`w-8 h-8 rounded-lg border border-slate-300 bg-white text-sm disabled:opacity-30 ${BTN3D}`}>↓</button>
+                <input
+                  type="text" value={x.name || ""} onChange={(e) => plRename(x.id, e.target.value)} placeholder="Όνομα υπηρεσίας"
+                  className="flex-1 min-w-0 border border-slate-300 rounded-lg px-2 py-1.5 text-base focus:outline-none focus:ring-2 focus:ring-violet-600"
+                />
+                {x.hidden ? (
+                  <button onClick={() => plHide(x.id, false)} className="shrink-0 px-2 h-8 rounded-lg border border-violet-300 bg-white text-[11px] font-bold text-violet-800">Επαναφορά</button>
+                ) : (
+                  <button onClick={() => plHide(x.id, true)} aria-label="Αφαίρεση" className="shrink-0 w-8 h-8 rounded-lg border border-red-300 bg-red-50 text-red-700 text-sm">🗑</button>
+                )}
+              </div>
+            ))}
+            <div className="flex items-center gap-1.5 pt-1">
+              <input
+                type="text" value={newPl} onChange={(e) => setNewPl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") plAdd(); }}
+                placeholder="Νέα υπηρεσία (π.χ. Fagi)"
+                className="flex-1 min-w-0 border border-slate-300 rounded-lg px-2 py-1.5 text-base focus:outline-none focus:ring-2 focus:ring-violet-600"
+              />
+              <button onClick={plAdd} className={`shrink-0 px-3 h-9 rounded-lg bg-gradient-to-b from-violet-500 to-violet-700 text-white text-sm font-bold ${BTN3D}`}>＋ Προσθήκη</button>
+            </div>
+          </div>
+        )}
       </div>
 
       <button
@@ -1809,7 +1899,7 @@ function CashTab({ day, setField, clearAll }) {
           <span className="font-bold">{cashFmt(turnover)}</span>
         </div>
         <div className="flex items-center justify-between text-xs text-slate-600">
-          <span>Σύνολο με efood, Wolt, Box, Delivery</span>
+          <span>Σύνολο με {plShown.length ? plShown.map((x) => x.name).filter(Boolean).join(", ") : "πλατφόρμες"}</span>
           <span className="font-bold">{cashFmt(grandTotal)}</span>
         </div>
       </div>
@@ -1834,7 +1924,7 @@ function CashTab({ day, setField, clearAll }) {
   );
 }
 
-function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, cashData, setCashData, cleanExtra, setCleanExtra, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo, thermoConfig }) {
+function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, cashData, setCashData, cashPlatforms, setCashPlatforms, cleanExtra, setCleanExtra, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo, thermoConfig }) {
   const [date, setDate] = useState(todayISO());
   const [shift, setShift] = useState(() => { try { return getActiveShift(new Date()); } catch (e) { return "Α"; } });
   const [sub, setSub] = useState("temps");
@@ -2123,6 +2213,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     const cleared = {};
     [...CASH_NOTES, ...CASH_COINS].forEach((d) => { cleared["d" + String(d).replace(".", "_")] = CASH_CLEARED; });
     CASH_OTHER.forEach(([k]) => { cleared[k] = CASH_CLEARED; });
+    Object.keys(dayCash).forEach((k) => { cleared[k] = CASH_CLEARED; }); // και κάθε τιμή υπηρεσίας που τυχόν έχει αφαιρεθεί από τη λίστα
     cleared.notes = CASH_CLEARED;
     cleared.invoices = CASH_CLEARED;
     const next = { ...(cashData || {}) };
@@ -2512,7 +2603,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         </Card>
       )}
 
-      {sub === "cash" && <CashTab day={dayCash} setField={setCashField} clearAll={clearCashDay} />}
+      {sub === "cash" && <CashTab day={dayCash} setField={setCashField} clearAll={clearCashDay} platforms={cashPlatforms} setPlatforms={setCashPlatforms} />}
 
       {sub === "oil" && (
         <Card>
@@ -3818,6 +3909,7 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
   const [device, setDeviceState] = useState(() => syncGetDevice());
   const [status, setStatus] = useState({ state: "idle", msg: "", last: SYNC_LS.get("brewtopia-sync-last", null), devices: SYNC_LS.get("brewtopia-sync-devices", []) });
   const [hasPreSync, setHasPreSync] = useState(() => !!SYNC_LS.get("brewtopia-pre-sync", null));
+  const [account, setAccount] = useState(() => SYNC_LS.get("brewtopia-sync-account", null)); // ο λογαριασμός Google που συνδέθηκε σε αυτή τη συσκευή (μένει μόνο εδώ)
   const tokenRef = useRef(null);
   const lockRef = useRef(false);
   const deviceRef = useRef(device);
@@ -3870,6 +3962,10 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
       const token = await getToken(interactive);
       SYNC_LS.set("brewtopia-sync-consented", true);
       needsLoginRef.current = false;
+      try {
+        const au = (await (await syncGfetch(token, "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress,displayName)")).json()).user;
+        if (au && au.emailAddress) { const acc = { email: au.emailAddress, name: au.displayName || "" }; SYNC_LS.set("brewtopia-sync-account", acc); setAccount(acc); }
+      } catch (e) { /* ο λογαριασμός είναι απλή ένδειξη — αν δεν διαβαστεί, ο συγχρονισμός συνεχίζει */ }
 
       // ο φάκελος βρίσκεται ξανά σε κάθε γύρο (ο παλαιότερος κερδίζει), ώστε δύο συσκευές να καταλήγουν πάντα στον ίδιο
       const rootId = await syncFindOrCreateFolder(token, "GlenApps", null);
@@ -4021,11 +4117,11 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [device.enabled]);
 
-  return { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync };
+  return { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync, account };
 }
 
 function SyncPanel({ sync }) {
-  const { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync } = sync;
+  const { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync, account } = sync;
   const [confirmUndo, setConfirmUndo] = useState(false);
   const busy = status.state === "running";
   const tone = status.state === "ok" ? "text-green-700" : status.state === "error" ? "text-red-600" : status.state === "warn" || status.state === "needs-login" ? "text-amber-700" : "text-slate-500";
@@ -4039,6 +4135,14 @@ function SyncPanel({ sync }) {
         Ό,τι καταχωρείς σε μία συσκευή (π.χ. μια καθαριότητα στον υπολογιστή) εμφανίζεται και στις άλλες, μέσα σε ένα λεπτό περίπου, όσο η εφαρμογή είναι ανοιχτή και συνδεδεμένη.
         Χρησιμοποίησε τον ΙΔΙΟ λογαριασμό Google σε όλες τις συσκευές. Ο συγχρονισμός προσθέτει και ενημερώνει· δεν σβήνει καταγραφές. Τα στοιχεία (και του προσωπικού) αποθηκεύονται στο δικό σου Google Drive.
       </p>
+      <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 mb-3 text-xs">
+        <span className="text-slate-500">Λογαριασμός Google σε αυτή τη συσκευή: </span>
+        {account && account.email ? (
+          <><b className="text-teal-900 break-all">{account.email}</b><span className="block text-[11px] text-slate-500 mt-0.5">Στον υπολογιστή του γραφείου συνδέσου με ΑΥΤΟΝ τον λογαριασμό.</span></>
+        ) : (
+          <b className="text-amber-700">δεν φαίνεται ακόμα — πάτα «Συγχρονισμός τώρα» και θα εμφανιστεί εδώ</b>
+        )}
+      </div>
       <Field label="Όνομα αυτής της συσκευής">
         <input className={inputCls} value={device.name} maxLength={30} onChange={(e) => setDevice({ name: e.target.value })} placeholder="π.χ. Κινητό Γιώργου, Υπολογιστής μαγαζιού" />
       </Field>
@@ -4114,6 +4218,7 @@ function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stations]);
+  const [cashPlatforms, setCashPlatforms] = useStore("cash-platforms", CASH_PLATFORMS_DEFAULT);
   const [shiftNames, setShiftNames] = useStore("shift-names", { Α: "Πρωινή", Β: "Μεσημεριανή", Γ: "Βραδινή" });
   const [subTabLabels, setSubTabLabels] = useStore("subtab-labels", {});
   const [displayItems, setDisplayItems] = useStore("display-items", DEFAULT_DISPLAY_ITEMS);
@@ -4273,7 +4378,7 @@ function App() {
   const getBackupText = () => {
     const data = {
       exportedAt: new Date().toISOString(),
-      employees, sessions, packageCompletions, ccpData, cleanData, oilData, cashData, cleanExtra, records, stations, shiftNames,
+      employees, sessions, packageCompletions, ccpData, cleanData, oilData, cashData, cashPlatforms, cleanExtra, records, stations, shiftNames,
       subTabLabels, displayItems, cleaningAreas, businessInfo, technicianVisits, safetyTechnician, sensorMap,
     };
     return JSON.stringify(data);
@@ -4288,6 +4393,7 @@ function App() {
     if (data.oilData) setOilData(data.oilData);
     if (data.cashData) setCashData(data.cashData);
     if (data.cleanExtra) setCleanExtra(data.cleanExtra);
+    if (data.cashPlatforms) setCashPlatforms(data.cashPlatforms);
     if (data.records) setRecords(data.records);
     if (data.stations) setStations(data.stations);
     if (data.shiftNames) setShiftNames(data.shiftNames);
@@ -4312,7 +4418,7 @@ function App() {
   const emptyRef = useRef(false);
   emptyRef.current = employees.length === 0 && Object.keys(ccpData || {}).length === 0 && records.length === 0;
   const backupDataKey = JSON.stringify([
-    employees, sessions, packageCompletions, ccpData, cleanData, oilData, cashData, cleanExtra, records, stations, shiftNames,
+    employees, sessions, packageCompletions, ccpData, cleanData, oilData, cashData, cashPlatforms, cleanExtra, records, stations, shiftNames,
     subTabLabels, displayItems, cleaningAreas, businessInfo, technicianVisits, safetyTechnician,
   ]);
 
@@ -4452,6 +4558,7 @@ function App() {
             cleanData={cleanData} setCleanData={setCleanData}
             oilData={oilData} setOilData={setOilData}
             cashData={cashData} setCashData={setCashData}
+            cashPlatforms={cashPlatforms} setCashPlatforms={setCashPlatforms}
             cleanExtra={cleanExtra} setCleanExtra={setCleanExtra}
             stations={stations} setStations={setStations}
             displayItems={displayItems} setDisplayItems={setDisplayItems}
