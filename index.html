@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-19.7"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-20.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1732,7 +1732,26 @@ function CashTab({ day, setField, clearAll }) {
     );
   };
   const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashNum(day["d" + String(d).replace(".", "_")]) * d), 0);
-  const otherTotal = CASH_OTHER.reduce((a, [k]) => a + cashCents(cashNum(day[k])), 0);
+  const CARD_KEYS = ["pos1", "pos2"];
+  const cardTotal = CARD_KEYS.reduce((a, k) => a + cashCents(cashNum(day[k])), 0);
+  const platformTotal = ["efood", "wolt", "box", "delivery"].reduce((a, k) => a + cashCents(cashNum(day[k])), 0);
+  const invoiceCents = cashCents(cashNum(day.invoices));
+  const turnover = cashTotal + invoiceCents + cardTotal;      // τζίρος ταμείου: μετρητά + τιμολόγια + κάρτες
+  const grandTotal = turnover + platformTotal;                 // + efood, Wolt, Box, Delivery
+  const [showInv, setShowInv] = useState(false);
+  const invOpen = showInv || invoiceCents > 0;
+  const moneyRow = ([k, label]) => (
+    <div key={k} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
+      <span className="text-sm font-semibold text-slate-700">{label}</span>
+      <input
+        type="text" inputMode="decimal" enterKeyHint="next" placeholder="0,00" onFocus={focusCenter}
+        className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-base text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
+        value={cv(k)}
+        onChange={(e) => setField(k, e.target.value.replace(/[^0-9,.]/g, ""))}
+      />
+    </div>
+  );
+  const OTHER_PLATFORMS = CASH_OTHER.filter(([k]) => !CARD_KEYS.includes(k));
   return (
     <Card>
       <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 mb-3 shadow-sm">
@@ -1749,23 +1768,33 @@ function CashTab({ day, setField, clearAll }) {
       </div>
 
       <div className="rounded-xl bg-sky-50 border border-sky-200 p-3 shadow-sm">
-      <p className="text-xs font-bold uppercase tracking-wide text-sky-800 mb-1">💳 Κάρτες και πλατφόρμες (γράψε το ποσό σε €)</p>
-      {CASH_OTHER.map(([k, label]) => (
-        <div key={k} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
-          <span className="text-sm font-semibold text-slate-700">{label}</span>
-          <input
-            type="text" inputMode="decimal" enterKeyHint="next" placeholder="0,00" onFocus={focusCenter}
-            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-base text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
-            value={cv(k)}
-            onChange={(e) => setField(k, e.target.value.replace(/[^0-9,.]/g, ""))}
-          />
-        </div>
-      ))}
+        <p className="text-xs font-bold uppercase tracking-wide text-sky-800 mb-1">💳 Κάρτες (γράψε το ποσό σε €)</p>
+        {CASH_OTHER.filter(([k]) => CARD_KEYS.includes(k)).map(moneyRow)}
       </div>
       <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2.5 rounded-xl bg-gradient-to-b from-sky-600 to-sky-800 text-white shadow-[0_3px_0_rgba(7,89,133,0.55)]">
         <span className="text-sm font-bold">Σύνολο καρτών</span>
-        <span className="text-base font-extrabold">{cashFmt(otherTotal)}</span>
+        <span className="text-base font-extrabold">{cashFmt(cardTotal)}</span>
       </div>
+
+      <div className="rounded-xl bg-violet-50 border border-violet-200 p-3 shadow-sm mb-5">
+        <p className="text-xs font-bold uppercase tracking-wide text-violet-800 mb-1">🛵 Πλατφόρμες (γράψε το ποσό σε €)</p>
+        {OTHER_PLATFORMS.map(moneyRow)}
+      </div>
+
+      <button
+        onClick={() => setShowInv((v) => !v)}
+        className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl bg-gradient-to-b from-orange-400 to-orange-600 text-white text-sm font-bold ${BTN3D}`}
+      >
+        <span>🧾 Τιμολόγια ταμείου</span>
+        <span>{invoiceCents > 0 ? cashFmt(invoiceCents) : invOpen ? "▲" : "▼"}</span>
+      </button>
+      {invOpen && (
+        <div className="rounded-xl bg-orange-50 border border-orange-200 p-3 mt-2 shadow-sm">
+          <p className="text-[11px] text-slate-500 mb-1">Γράψε το σύνολο των τιμολογίων που πληρώθηκαν από το ταμείο.</p>
+          {moneyRow(["invoices", "Σύνολο τιμολογίων"])}
+        </div>
+      )}
+      <div className="mb-5" />
 
       <Field label="Σημειώσεις">
         <textarea
@@ -1773,6 +1802,17 @@ function CashTab({ day, setField, clearAll }) {
           value={cv("notes")} onChange={(e) => setField("notes", e.target.value)}
         />
       </Field>
+
+      <div className="mt-4 pt-3 border-t border-slate-200 opacity-60 space-y-1">
+        <div className="flex items-center justify-between text-xs text-slate-600">
+          <span>Τζίρος ταμείου <span className="text-[10px]">(μετρητά + τιμολόγια + κάρτες)</span></span>
+          <span className="font-bold">{cashFmt(turnover)}</span>
+        </div>
+        <div className="flex items-center justify-between text-xs text-slate-600">
+          <span>Σύνολο με efood, Wolt, Box, Delivery</span>
+          <span className="font-bold">{cashFmt(grandTotal)}</span>
+        </div>
+      </div>
 
       <div className="mt-4 pt-4 border-t border-slate-200">
         {!confirmDel ? (
@@ -2084,6 +2124,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     [...CASH_NOTES, ...CASH_COINS].forEach((d) => { cleared["d" + String(d).replace(".", "_")] = CASH_CLEARED; });
     CASH_OTHER.forEach(([k]) => { cleared[k] = CASH_CLEARED; });
     cleared.notes = CASH_CLEARED;
+    cleared.invoices = CASH_CLEARED;
     const next = { ...(cashData || {}) };
     next[mk] = { ...(next[mk] || {}) };
     next[mk][date] = { ...(next[mk][date] || {}), [shift]: cleared };
