@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-20.5"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-22.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -3447,19 +3447,59 @@ function ThermoServerPanel({ config, setConfig }) {
   );
 }
 
+// ---- Κωδικός διαχειριστή: αποθηκεύεται ΜΟΝΟ ως κατακερματισμός (PBKDF2), ποτέ ως απλό κείμενο ----
+const ADMIN_ITER = 200000;
+const ADMIN_MIN_LEN = 6;
+async function adminHash(code, saltB64) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(code)), "PBKDF2", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: syncUnb64(saltB64), iterations: ADMIN_ITER, hash: "SHA-256" }, base, 256);
+  return syncB64(bits);
+}
+async function adminMake(code) {
+  const salt = syncB64(crypto.getRandomValues(new Uint8Array(16)));
+  return { v: 2, salt, hash: await adminHash(code, salt) };
+}
+// Επιστρέφει true/false. Παλιός κωδικός ως απλό κείμενο (string) συγκρίνεται και μετά αναβαθμίζεται.
+async function adminCheck(code, stored) {
+  if (typeof stored === "string") return stored !== "" && code === stored;
+  if (stored && stored.v === 2 && stored.salt && stored.hash) {
+    const h = await adminHash(code, stored.salt);
+    let d = 0;
+    if (h.length !== stored.hash.length) return false;
+    for (let i = 0; i < h.length; i++) d |= h.charCodeAt(i) ^ stored.hash.charCodeAt(i);
+    return d === 0;
+  }
+  return false;
+}
+const adminIsLegacyWeak = (stored) => typeof stored === "string" && (stored === "1234" || stored.length < ADMIN_MIN_LEN);
+const adminIsUnset = (stored) => stored === null || stored === undefined || stored === "";
+// Κλείδωμα μετά από λάθος προσπάθειες (δεν μπορεί να δοκιμαστεί ο ένας κωδικός μετά τον άλλον)
+const ADMIN_LOCK_KEY = "brewtopia-admin-lock";
+function adminLockRead() { try { return JSON.parse(window.localStorage.getItem(ADMIN_LOCK_KEY) || "null") || { n: 0, until: 0 }; } catch (e) { return { n: 0, until: 0 }; } }
+function adminLockWrite(v) { try { window.localStorage.setItem(ADMIN_LOCK_KEY, JSON.stringify(v)); } catch (e) {} }
+
 function AdminCodePanel({ code, setCode }) {
   const [editing, setEditing] = useState(false);
+  const [current, setCurrent] = useState("");
   const [draft, setDraft] = useState("");
   const [confirmDraft, setConfirmDraft] = useState("");
   const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const unset = adminIsUnset(code);
 
-  const startEdit = () => { setDraft(""); setConfirmDraft(""); setError(""); setEditing(true); };
+  const startEdit = () => { setCurrent(""); setDraft(""); setConfirmDraft(""); setError(""); setEditing(true); };
 
-  const save = () => {
-    if (!draft.trim()) { setError("Γράψε νέο κωδικό."); return; }
+  const save = async () => {
+    if (busy) return;
+    if (draft.length < ADMIN_MIN_LEN) { setError(`Ο κωδικός πρέπει να έχει τουλάχιστον ${ADMIN_MIN_LEN} χαρακτήρες.`); return; }
+    if (draft === "1234" || /^(.)\1+$/.test(draft)) { setError("Αυτός ο κωδικός είναι πολύ εύκολος."); return; }
     if (draft !== confirmDraft) { setError("Οι κωδικοί δεν ταιριάζουν."); return; }
-    setCode(draft.trim());
-    setEditing(false);
+    setBusy(true);
+    try {
+      if (!unset && !(await adminCheck(current, code))) { setError("Ο τρέχων κωδικός δεν είναι σωστός."); return; }
+      setCode(await adminMake(draft));
+      setEditing(false);
+    } catch (e) { setError("Δεν ήταν δυνατή η αποθήκευση."); } finally { setBusy(false); }
   };
 
   return (
@@ -3468,25 +3508,27 @@ function AdminCodePanel({ code, setCode }) {
         <ShieldCheck size={14} /> Κωδικός Διαχειριστή
       </p>
       <p className="text-xs text-slate-500 mb-2">
-        Ζητείται για να μπεις στις καρτέλες «Προσωπικό» και «Εκπαίδευση» — ώστε μόνο εσύ να τις βλέπεις.
+        Ζητείται για να μπεις στις καρτέλες «Προσωπικό» και «Εκπαίδευση» — ώστε μόνο εσύ να τις βλέπεις. Αποθηκεύεται κατακερματισμένος (δεν διαβάζεται από κανέναν).
       </p>
+      {unset && <p className="text-xs text-red-600 font-semibold mb-2">Δεν έχει οριστεί κωδικός. Όρισε έναν τώρα.</p>}
+      {adminIsLegacyWeak(code) && <p className="text-xs text-red-600 font-semibold mb-2">Ο κωδικός είναι ο παλιός/εύκολος. Άλλαξέ τον τώρα.</p>}
       {!editing ? (
         <button onClick={startEdit} className="text-[11px] text-teal-700 underline">
-          Αλλαγή κωδικού
+          {unset ? "Ορισμός κωδικού" : "Αλλαγή κωδικού"}
         </button>
       ) : (
         <div className="space-y-2">
-          <input
-            type="password" inputMode="numeric" autoFocus placeholder="Νέος κωδικός"
-            className={inputCls + " max-w-[160px]"} value={draft} onChange={(e) => { setDraft(e.target.value); setError(""); }}
-          />
-          <input
-            type="password" inputMode="numeric" placeholder="Επανάληψη νέου κωδικού"
-            className={inputCls + " max-w-[160px]"} value={confirmDraft} onChange={(e) => { setConfirmDraft(e.target.value); setError(""); }}
-          />
+          {!unset && (
+            <input type="password" autoFocus placeholder="Τρέχων κωδικός" autoComplete="off"
+              className={inputCls + " max-w-[220px]"} value={current} onChange={(e) => { setCurrent(e.target.value); setError(""); }} />
+          )}
+          <input type="password" placeholder={`Νέος κωδικός (τουλάχιστον ${ADMIN_MIN_LEN})`} autoComplete="new-password"
+            className={inputCls + " max-w-[220px]"} value={draft} onChange={(e) => { setDraft(e.target.value); setError(""); }} />
+          <input type="password" placeholder="Επανάληψη νέου κωδικού" autoComplete="new-password"
+            className={inputCls + " max-w-[220px]"} value={confirmDraft} onChange={(e) => { setConfirmDraft(e.target.value); setError(""); }} />
           {error && <p className="text-xs text-red-600">{error}</p>}
           <div className="flex items-center gap-2">
-            <button onClick={save} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold">Αποθήκευση</button>
+            <button disabled={busy} onClick={save} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50">Αποθήκευση</button>
             <button onClick={() => setEditing(false)} className="border border-slate-300 px-3 py-2 rounded-lg text-xs">Άκυρο</button>
           </div>
         </div>
@@ -3495,16 +3537,66 @@ function AdminCodePanel({ code, setCode }) {
   );
 }
 
-function AdminGate({ code, unlocked, setUnlocked, children }) {
+function AdminGate({ code, setCode, unlocked, setUnlocked, children }) {
   const [input, setInput] = useState("");
-  const [error, setError] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [mustSet, setMustSet] = useState(false);
+  const [n1, setN1] = useState("");
+  const [n2, setN2] = useState("");
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(t); }, []);
+  const lock = adminLockRead();
+  const waitSec = Math.max(0, Math.ceil((lock.until - now) / 1000));
 
-  if (unlocked) return children;
-
-  const tryUnlock = (e) => {
+  const setNew = async (e) => {
     e.preventDefault();
-    if (input === code) { setUnlocked(true); setError(false); }
-    else setError(true);
+    if (n1.length < ADMIN_MIN_LEN) { setError(`Τουλάχιστον ${ADMIN_MIN_LEN} χαρακτήρες.`); return; }
+    if (n1 === "1234" || /^(.)\1+$/.test(n1)) { setError("Πολύ εύκολος κωδικός."); return; }
+    if (n1 !== n2) { setError("Οι κωδικοί δεν ταιριάζουν."); return; }
+    setBusy(true);
+    try { setCode(await adminMake(n1)); adminLockWrite({ n: 0, until: 0 }); setMustSet(false); setUnlocked(true); }
+    catch (err) { setError("Δεν ήταν δυνατή η αποθήκευση."); } finally { setBusy(false); }
+  };
+
+  if (unlocked && !mustSet) return children;
+
+  // πρώτη φορά (δεν υπάρχει κωδικός) ή υποχρεωτική αλλαγή του παλιού «1234»
+  if (adminIsUnset(code) || mustSet) {
+    return (
+      <Card>
+        <p className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-1.5"><ShieldCheck size={16} /> Όρισε κωδικό διαχειριστή</p>
+        <p className="text-xs text-slate-500 mb-3">Για την ασφάλεια των στοιχείων του προσωπικού χρειάζεται δικός σου κωδικός (τουλάχιστον {ADMIN_MIN_LEN} χαρακτήρες).</p>
+        <form onSubmit={setNew} className="space-y-2">
+          <input type="password" autoFocus autoComplete="new-password" className={`${inputCls} max-w-[220px]`} placeholder="Νέος κωδικός" value={n1} onChange={(e) => { setN1(e.target.value); setError(""); }} />
+          <input type="password" autoComplete="new-password" className={`${inputCls} max-w-[220px]`} placeholder="Επανάληψη" value={n2} onChange={(e) => { setN2(e.target.value); setError(""); }} />
+          <div><button type="submit" disabled={busy} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">Αποθήκευση</button></div>
+        </form>
+        {error && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      </Card>
+    );
+  }
+
+  const tryUnlock = async (e) => {
+    e.preventDefault();
+    if (busy || waitSec > 0) return;
+    setBusy(true);
+    try {
+      if (await adminCheck(input, code)) {
+        adminLockWrite({ n: 0, until: 0 });
+        setError("");
+        if (adminIsLegacyWeak(code)) { setMustSet(true); setUnlocked(false); }
+        else {
+          if (typeof code === "string") { try { setCode(await adminMake(input)); } catch (err) { /* μένει ο παλιός μέχρι την επόμενη φορά */ } }
+          setUnlocked(true);
+        }
+      } else {
+        const n = (lock.n || 0) + 1;
+        const until = n >= 5 ? Date.now() + Math.min(15 * 60, 30 * Math.pow(2, n - 5)) * 1000 : 0;
+        adminLockWrite({ n, until });
+        setError(n >= 5 ? "Πολλές λάθος προσπάθειες — περίμενε." : "Λάθος κωδικός.");
+      }
+    } catch (err) { setError("Δεν ήταν δυνατός ο έλεγχος."); } finally { setBusy(false); setInput(""); }
   };
 
   return (
@@ -3516,15 +3608,16 @@ function AdminGate({ code, unlocked, setUnlocked, children }) {
       <form onSubmit={tryUnlock} className="flex items-center gap-2">
         <input
           type="password"
-          autoFocus
+          autoFocus autoComplete="off"
           value={input}
-          onChange={(e) => { setInput(e.target.value); setError(false); }}
-          className={`${inputCls} max-w-[160px]`}
+          onChange={(e) => { setInput(e.target.value); setError(""); }}
+          className={`${inputCls} max-w-[200px]`}
           placeholder="Κωδικός διαχειριστή"
         />
-        <button type="submit" className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Είσοδος</button>
+        <button type="submit" disabled={busy || waitSec > 0} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">Είσοδος</button>
       </form>
-      {error && <p className="text-xs text-red-600 mt-2">Λάθος κωδικός.</p>}
+      {waitSec > 0 && <p className="text-xs text-red-600 mt-2">Κλειδώθηκε για {waitSec} δευτερόλεπτα.</p>}
+      {error && waitSec === 0 && <p className="text-xs text-red-600 mt-2">{error}</p>}
     </Card>
   );
 }
@@ -3983,6 +4076,76 @@ async function syncUploadJson(token, fileId, folderId, name, text) {
   return (await r.json()).id;
 }
 
+/* SYNC-CRYPTO-START */
+// Κρυπτογράφηση από άκρο σε άκρο: ό,τι ανεβαίνει στο Google Drive είναι κρυπτογραφημένο (AES-256-GCM) με κλειδί
+// που προκύπτει από κωδικό που ξέρεις ΜΟΝΟ εσύ (PBKDF2-SHA256). Το Google δεν βλέπει ποτέ το περιεχόμενο.
+// Δύο κλειδιά: «συγχρονισμού» (όλες οι συσκευές) και «προσωπικών στοιχείων» (μόνο οι συσκευές του διαχειριστή).
+const SYNC_KEYFILE1 = "brewtopia-key.json";
+const SYNC_KEYFILE2 = "brewtopia-key-pers.json";
+const SYNC_PBKDF2_ITER = 600000;
+const SYNC_PERSONAL_KEYS = ["employees", "sessions", "packageCompletions"];
+const syncB64 = (buf) => { const b = new Uint8Array(buf); let s = ""; for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000)); return btoa(s); };
+const syncUnb64 = (str) => { const s = atob(str); const b = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) b[i] = s.charCodeAt(i); return b; };
+const syncNormPass = (p) => String(p || "").normalize("NFC").trim();
+async function syncDeriveKey(pass, saltB64, iter) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(syncNormPass(pass)), "PBKDF2", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", salt: syncUnb64(saltB64), iterations: iter, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+}
+async function syncEncrypt(key, text, aad) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad || "") }, key, new TextEncoder().encode(text));
+  return { iv: syncB64(iv), ct: syncB64(ct) };
+}
+async function syncDecrypt(key, env, aad) {
+  const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: syncUnb64(env.iv), additionalData: new TextEncoder().encode(aad || "") }, key, syncUnb64(env.ct));
+  return new TextDecoder().decode(pt);
+}
+// Βρίσκει ή φτιάχνει το κλειδί. which: "sync" | "pers". Το κλειδί μένει στη συσκευή ως ΜΗ εξαγώγιμο (δεν διαβάζεται, μόνο χρησιμοποιείται).
+async function syncEnsureKey(token, files, folderId, pass, which) {
+  const fileName = which === "pers" ? SYNC_KEYFILE2 : SYNC_KEYFILE1;
+  const idbName = which === "pers" ? "persKey" : "syncKey";
+  const minLen = which === "pers" ? 8 : 12;
+  const kfs = files.filter((f) => f.name === fileName).sort((a, b) => String(a.modifiedTime || "").localeCompare(String(b.modifiedTime || "")));
+  let meta = null;
+  if (kfs.length) {
+    try { meta = JSON.parse(await (await syncGfetch(token, `https://www.googleapis.com/drive/v3/files/${kfs[0].id}?alt=media`)).text()); } catch (e) { meta = null; }
+    if (!meta || meta.format !== "brewtopia-key-1" || !meta.salt || !meta.check) throw new Error("Το αρχείο κλειδιού στο Drive δεν είναι έγκυρο. Δεν άλλαξε τίποτα.");
+  }
+  if (meta) {
+    let cached = null;
+    try { cached = await idbGetBrewtopia(idbName); } catch (e) { cached = null; }
+    if (cached && cached.salt === meta.salt && cached.key) {
+      try { if ((await syncDecrypt(cached.key, meta.check, "check")) === "brewtopia-ok") return cached.key; } catch (e) { /* ξανά με κωδικό */ }
+    }
+  }
+  const p = syncNormPass(pass);
+  if (!p) { const e = new Error("needs-pass"); e.needsPass = true; e.which = which; throw e; }
+  if (meta) {
+    const key = await syncDeriveKey(p, meta.salt, meta.iter || SYNC_PBKDF2_ITER);
+    let ok = false;
+    try { ok = (await syncDecrypt(key, meta.check, "check")) === "brewtopia-ok"; } catch (e) { ok = false; }
+    if (!ok) { const e = new Error(which === "pers" ? "Λάθος κωδικός προσωπικών στοιχείων." : "Λάθος κωδικός συγχρονισμού."); e.wrongPass = true; e.which = which; throw e; }
+    try { await idbSetBrewtopia(idbName, { salt: meta.salt, key }); } catch (e) { throw new Error("Αυτή η συσκευή δεν μπορεί να κρατήσει με ασφάλεια το κλειδί (ιδιωτική περιήγηση;)."); }
+    return key;
+  }
+  // πρώτη φορά: δημιουργία κλειδιού από τον κωδικό που έδωσε ο χρήστης
+  if (p.length < minLen) { const e = new Error(`Ο κωδικός πρέπει να έχει τουλάχιστον ${minLen} χαρακτήρες.`); e.weakPass = true; e.which = which; throw e; }
+  const salt = syncB64(crypto.getRandomValues(new Uint8Array(16)));
+  const key = await syncDeriveKey(p, salt, SYNC_PBKDF2_ITER);
+  const check = await syncEncrypt(key, "brewtopia-ok", "check");
+  await syncUploadJson(token, null, folderId, fileName, JSON.stringify({ format: "brewtopia-key-1", salt, iter: SYNC_PBKDF2_ITER, check }));
+  try { await idbSetBrewtopia(idbName, { salt, key }); } catch (e) { throw new Error("Αυτή η συσκευή δεν μπορεί να κρατήσει με ασφάλεια το κλειδί (ιδιωτική περιήγηση;)."); }
+  // αν δύο συσκευές το έφτιαξαν ταυτόχρονα, ξανά-έλεγχος: κερδίζει το παλαιότερο
+  const again = [];
+  try {
+    const lj = await (await syncGfetch(token, "https://www.googleapis.com/drive/v3/files?pageSize=50&fields=files(id,name,modifiedTime)&q=" + encodeURIComponent(`'${folderId}' in parents and trashed=false and name='${fileName}'`))).json();
+    (lj.files || []).forEach((f) => again.push(f));
+  } catch (e) { /* αγνοείται */ }
+  if (again.length > 1) { const e = new Error("Δημιουργήθηκαν δύο κλειδιά ταυτόχρονα — πάτα ξανά «Συγχρονισμός τώρα» με τον ίδιο κωδικό."); e.retry = true; throw e; }
+  return key;
+}
+/* SYNC-CRYPTO-END */
+
 function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
   const [device, setDeviceState] = useState(() => syncGetDevice());
   const [status, setStatus] = useState({ state: "idle", msg: "", last: SYNC_LS.get("brewtopia-sync-last", null), devices: SYNC_LS.get("brewtopia-sync-devices", []) });
@@ -3993,6 +4156,9 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
   const deviceRef = useRef(device);
   deviceRef.current = device;
   const needsLoginRef = useRef(false);
+  const passRef = useRef("");      // κωδικοί: μένουν μόνο στη μνήμη για μία προσπάθεια, δεν αποθηκεύονται πουθενά
+  const persPassRef = useRef("");
+  const [keyState, setKeyState] = useState({ sync: false, pers: false });
 
   const setDevice = (patch) => {
     const next = { ...deviceRef.current, ...patch };
@@ -4054,7 +4220,7 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
         for (let guard = 0; guard < 20; guard++) {
           const listQ = `'${folderId}' in parents and trashed=false`;
           const lj = await (await syncGfetch(token, "https://www.googleapis.com/drive/v3/files?pageSize=200&fields=nextPageToken,files(id,name,modifiedTime)&q=" + encodeURIComponent(listQ) + (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : ""))).json();
-          (lj.files || []).forEach((f) => { if (f.name.startsWith(SYNC_FILE_PREFIX)) files.push(f); });
+          (lj.files || []).forEach((f) => { if (f.name.startsWith(SYNC_FILE_PREFIX) || f.name === SYNC_KEYFILE1 || f.name === SYNC_KEYFILE2) files.push(f); });
           pageToken = lj.nextPageToken || "";
           if (!pageToken) break;
           if (guard === 19) throw new Error("Πάρα πολλά αρχεία στο φάκελο συγχρονισμού.");
@@ -4066,21 +4232,41 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
       const ownName = SYNC_FILE_PREFIX + dev.id + ".json";
       const own = files.find((f) => f.name === ownName);
 
+      // 0) κλειδιά κρυπτογράφησης (κωδικοί που ξέρεις μόνο εσύ — το Google βλέπει μόνο ακατάληπτα δεδομένα)
+      if (!(typeof crypto !== "undefined" && crypto.subtle)) throw new Error("Αυτός ο browser δεν υποστηρίζει κρυπτογράφηση — ο συγχρονισμός δεν ξεκίνησε.");
+      const key1 = await syncEnsureKey(token, files, folderId, passRef.current, "sync");
+      const key2 = dev.noPersonal ? null : await syncEnsureKey(token, files, folderId, persPassRef.current, "pers");
+      passRef.current = ""; persPassRef.current = "";
+      setKeyState({ sync: true, pers: !dev.noPersonal });
+      const stripPersonal = (d) => { const o = { ...d }; SYNC_PERSONAL_KEYS.forEach((k) => { delete o[k]; }); return o; };
+
       // 1) κατεβάζουμε τα αρχεία των άλλων συσκευών (δίκτυο) — ΠΡΙΝ διαβάσουμε τα τοπικά δεδομένα
       const remotes = [];
       let skipped = 0;
+      let legacy = 0;
       for (const f of files) {
-        if (f.name === ownName || !f.name.endsWith(".json") || f.name.includes("-prin-")) continue;
+        if (f.name === ownName || f.name === SYNC_KEYFILE1 || f.name === SYNC_KEYFILE2 || !f.name.endsWith(".json") || f.name.includes("-prin-")) continue;
         try {
           const txt = await (await syncGfetch(token, `https://www.googleapis.com/drive/v3/files/${f.id}?alt=media`)).text();
-          const s = JSON.parse(txt);
-          if (syncValidSnapshot(s) && s.deviceId !== dev.id) remotes.push(s); else skipped++;
+          let s = JSON.parse(txt);
+          if (s && s.format === "brewtopia-sync-enc-1" && typeof s.deviceId === "string") {
+            s = JSON.parse(await syncDecrypt(key1, s, "brewtopia-sync-enc-1:" + s.deviceId));
+            if (s.pers && key2) {
+              const pj = JSON.parse(await syncDecrypt(key2, s.pers, "brewtopia-pers-1:" + s.deviceId));
+              Object.keys(pj).forEach((k) => { if (SYNC_PERSONAL_KEYS.includes(k)) s.data[k] = pj[k]; });
+            }
+          } else { legacy++; }
+          if (syncValidSnapshot(s) && s.deviceId !== dev.id) {
+            if (dev.noPersonal) s.data = stripPersonal(s.data);
+            remotes.push(s);
+          } else skipped++;
         } catch (e) { skipped++; }
       }
 
       // 2) από εδώ και κάτω ΟΛΑ σύγχρονα: διάβασμα τοπικών → συγχώνευση → εφαρμογή (δεν χωράει αλλαγή του χρήστη στη μέση)
       if (window.__brewtopiaPersistFailed) throw new Error("Η αποθήκευση σε αυτή τη συσκευή απέτυχε (γεμάτος χώρος;). Ο συγχρονισμός σταμάτησε για να μη χαθεί αλλαγή. Ξαναφόρτωσε τη σελίδα.");
-      const localData = syncReadLocalData(() => fallbackTextRef.current());
+      let localData = syncReadLocalData(() => fallbackTextRef.current());
+      if (dev.noPersonal) localData = stripPersonal(localData); // συσκευή προσωπικού: τα στοιχεία υπαλλήλων δεν ανεβαίνουν ποτέ από εδώ
       const localMeta = SYNC_LS.get("brewtopia-sync-meta", {});
       let purged = SYNC_LS.get("brewtopia-sync-purged", {});
       let cur = { data: localData, meta: localMeta, itemMeta: SYNC_LS.get("brewtopia-sync-itemts", {}), role: dev.role, deviceId: dev.id };
@@ -4114,7 +4300,7 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
       const total = syncCount(cur.data);
       let uploaded = false;
       if (total > 0) {
-        const core = JSON.stringify({ data: cur.data, meta: cur.meta, itemMeta: cur.itemMeta, purged, role: dev.role, name: dev.name });
+        const core = JSON.stringify({ data: cur.data, meta: cur.meta, itemMeta: cur.itemMeta, purged, role: dev.role, name: dev.name, enc: 2, np: !!dev.noPersonal });
         const h = syncHash(core);
         if (!own || SYNC_LS.get("brewtopia-sync-lasthash", null) !== h) {
           const lastCount = SYNC_LS.get("brewtopia-sync-lastcount", 0);
@@ -4125,8 +4311,15 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
               body: JSON.stringify({ name: `${SYNC_FILE_PREFIX}${dev.id}-prin-${new Date().toISOString().replace(/[:.]/g, "-")}.json`, parents: [folderId] }),
             });
           }
-          const snap = { format: "brewtopia-sync-1", deviceId: dev.id, deviceName: dev.name, role: dev.role, appVersion: APP_VERSION, savedAt: new Date().toISOString(), meta: cur.meta, itemMeta: cur.itemMeta, purged, data: cur.data };
-          await syncUploadJson(token, own ? own.id : null, folderId, ownName, JSON.stringify(snap));
+          const dataOut = stripPersonal(cur.data);
+          const snap = { format: "brewtopia-sync-1", deviceId: dev.id, deviceName: dev.name, role: dev.role, appVersion: APP_VERSION, savedAt: new Date().toISOString(), meta: cur.meta, itemMeta: cur.itemMeta, purged, data: dataOut };
+          if (key2) {
+            const persObj = {};
+            SYNC_PERSONAL_KEYS.forEach((k) => { if (cur.data[k] !== undefined) persObj[k] = cur.data[k]; });
+            if (Object.keys(persObj).length) snap.pers = await syncEncrypt(key2, JSON.stringify(persObj), "brewtopia-pers-1:" + dev.id);
+          }
+          const env = await syncEncrypt(key1, JSON.stringify(snap), "brewtopia-sync-enc-1:" + dev.id);
+          await syncUploadJson(token, own ? own.id : null, folderId, ownName, JSON.stringify({ format: "brewtopia-sync-enc-1", deviceId: dev.id, savedAt: snap.savedAt, iv: env.iv, ct: env.ct }));
           SYNC_LS.set("brewtopia-sync-lasthash", h);
           SYNC_LS.set("brewtopia-sync-lastcount", total);
           uploaded = true;
@@ -4143,11 +4336,16 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
       if (total === 0) notes.push("δεν ανέβηκε τίποτα — η εφαρμογή είναι άδεια");
       if (masters > 1) notes.push("ΠΡΟΣΟΧΗ: έχουν οριστεί περισσότερες από μία κύριες συσκευές");
       if (masters === 0) notes.push("δεν έχει οριστεί κύρια συσκευή");
-      if (skipped) notes.push(`${skipped} αρχείο/α αγνοήθηκαν`);
+      if (skipped) notes.push(`${skipped} αρχείο/α αγνοήθηκαν (άλλος κωδικός ή παλιά έκδοση)`);
+      if (legacy) notes.push(`${legacy} συσκευή/ές δεν έχουν ακόμα την κρυπτογράφηση — ενημέρωσέ τες`);
       setStatus({ state: masters !== 1 ? "warn" : "ok", msg: notes.length ? notes.join(" · ") : "όλα ενημερωμένα", last: now, devices });
     } catch (e) {
       if (e && e.status === 401) { tokenRef.current = null; e.needsLogin = true; }
-      if (e && e.needsLogin) {
+      passRef.current = ""; persPassRef.current = "";
+      if (e && e.needsPass) {
+        needsLoginRef.current = true;
+        setStatus((s) => ({ ...s, state: "needs-login", msg: e.which === "pers" ? "Βάλε τον κωδικό ΠΡΟΣΩΠΙΚΩΝ στοιχείων και πάτα «Συγχρονισμός τώρα»." : "Βάλε τον κωδικό συγχρονισμού και πάτα «Συγχρονισμός τώρα»." }));
+      } else if (e && e.needsLogin) {
         needsLoginRef.current = true;
         setStatus((s) => ({ ...s, state: "needs-login", msg: "Χρειάζεται να πατήσεις «Σύνδεση / Συγχρονισμός τώρα»." }));
       } else {
@@ -4160,12 +4358,17 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
   const runRef = useRef(runSync);
   runRef.current = runSync;
 
-  const enable = async () => {
+  const enable = async (opts) => {
     needsLoginRef.current = false;
+    passRef.current = (opts && opts.pass) || ""; persPassRef.current = (opts && opts.persPass) || "";
     setDevice({ enabled: true });
     await runRef.current(true);
   };
-  const syncNow = async () => { needsLoginRef.current = false; await runRef.current(true); };
+  const syncNow = async (opts) => {
+    needsLoginRef.current = false;
+    passRef.current = (opts && opts.pass) || ""; persPassRef.current = (opts && opts.persPass) || "";
+    await runRef.current(true);
+  };
   const disable = () => { setDevice({ enabled: false }); setStatus((s) => ({ ...s, state: "idle", msg: "Ο συγχρονισμός είναι ανενεργός σε αυτή τη συσκευή." })); };
   const undoLast = () => {
     const snap = SYNC_LS.get("brewtopia-pre-sync", null);
@@ -4180,6 +4383,16 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
 
   // Προφόρτωση της σύνδεσης Google, ώστε το παράθυρο σύνδεσης να ανοίγει αμέσως με το πάτημα του κουμπιού (αλλιώς το μπλοκάρει ο browser)
   useEffect(() => { syncLoadGis().catch(() => {}); }, []);
+  // ένδειξη κρυπτογράφησης: υπάρχουν ήδη κλειδιά σε αυτή τη συσκευή;
+  useEffect(() => {
+    (async () => {
+      try {
+        const a1 = await idbGetBrewtopia("syncKey");
+        const b1 = await idbGetBrewtopia("persKey");
+        setKeyState({ sync: !!(a1 && a1.key), pers: !!(b1 && b1.key) });
+      } catch (e) { /* αγνοείται */ }
+    })();
+  }, []);
 
   // Αυτόματα: λίγο μετά από κάθε αλλαγή, κάθε 90 δευτερόλεπτα ενώ η σελίδα φαίνεται, και όταν ξαναφαίνεται η σελίδα.
   useEffect(() => {
@@ -4195,12 +4408,15 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
     return () => { clearInterval(iv); document.removeEventListener("visibilitychange", onVis); };
   }, [device.enabled]);
 
-  return { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync, account };
+  return { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync, account, keyState };
 }
 
 function SyncPanel({ sync }) {
-  const { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync, account } = sync;
+  const { device, setDevice, status, enable, syncNow, disable, undoLast, hasPreSync, account, keyState } = sync;
   const [confirmUndo, setConfirmUndo] = useState(false);
+  const [pass, setPass] = useState("");
+  const [persPass, setPersPass] = useState("");
+  const optsNow = () => { const o = { pass, persPass }; setPass(""); setPersPass(""); return o; };
   const busy = status.state === "running";
   const tone = status.state === "ok" ? "text-green-700" : status.state === "error" ? "text-red-600" : status.state === "warn" || status.state === "needs-login" ? "text-amber-700" : "text-slate-500";
   const fmt = (iso) => { try { return new Date(iso).toLocaleString("el-GR"); } catch (e) { return ""; } };
@@ -4231,12 +4447,36 @@ function SyncPanel({ sync }) {
         </select>
       </Field>
       <p className="text-[11px] text-slate-400 -mt-1 mb-3">Όρισε ΜΙΑ μόνο κύρια συσκευή (το κινητό σου). Οι άλλες είναι δευτερεύουσες.</p>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 mb-3">
+        <p className="text-xs font-bold text-slate-700 mb-1">🔒 Κρυπτογράφηση (το Google δεν βλέπει τίποτα)</p>
+        <p className="text-[11px] text-slate-500 mb-2">
+          Τα δεδομένα κρυπτογραφούνται στη συσκευή πριν ανέβουν στο Drive. Ο κωδικός δεν αποθηκεύεται πουθενά και δεν μπορεί να ανακτηθεί — γράψ' τον σε ασφαλές μέρος. Στην ΠΡΩΤΗ συσκευή (το κινητό σου) διάλεξε εσύ τους κωδικούς· στις άλλες βάζεις τους ίδιους. Μετά τη σύνδεση δεν ζητούνται ξανά σε αυτή τη συσκευή.
+        </p>
+        <p className="text-[11px] mb-1">
+          Κατάσταση: {keyState && keyState.sync ? <b className="text-teal-700">κλειδί συγχρονισμού ενεργό ✓</b> : <b className="text-amber-700">δεν έχει οριστεί κωδικός συγχρονισμού</b>}
+          {!device.noPersonal && (keyState && keyState.pers ? <b className="text-teal-700"> · κλειδί προσωπικών ✓</b> : <b className="text-amber-700"> · δεν έχει οριστεί κωδικός προσωπικών</b>)}
+        </p>
+        {!(keyState && keyState.sync) && (
+          <Field label="Κωδικός συγχρονισμού (τουλάχιστον 12 χαρακτήρες)">
+            <input type="password" autoComplete="new-password" spellCheck={false} className={inputCls} value={pass} onChange={(e) => setPass(e.target.value)} placeholder="π.χ. μια φράση που θυμάσαι" />
+          </Field>
+        )}
+        {!device.noPersonal && !(keyState && keyState.pers) && (
+          <Field label="Κωδικός προσωπικών στοιχείων υπαλλήλων (τουλάχιστον 8 χαρακτήρες — διαφορετικός από τον άλλον)">
+            <input type="password" autoComplete="new-password" spellCheck={false} className={inputCls} value={persPass} onChange={(e) => setPersPass(e.target.value)} />
+          </Field>
+        )}
+        <label className="flex items-start gap-2 text-[11px] text-slate-600 mt-2">
+          <input type="checkbox" className="mt-0.5" checked={!!device.noPersonal} onChange={(e) => setDevice({ noPersonal: e.target.checked })} />
+          <span><b>Συσκευή προσωπικού</b> (για τα παιδιά): δεν κατεβάζει και δεν ανεβάζει τα στοιχεία των υπαλλήλων και δεν χρειάζεται τον κωδικό προσωπικών. Βλέπει και συμπληρώνει μόνο καταγραφές. Όσα στοιχεία υπαλλήλων υπάρχουν ήδη σε αυτή τη συσκευή, σβήσ' τα από την καρτέλα «Προσωπικό».</span>
+        </label>
+      </div>
       <div className="flex flex-wrap gap-2 mb-2">
         {!device.enabled ? (
-          <button disabled={busy} onClick={enable} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold disabled:opacity-50">Ενεργοποίηση συγχρονισμού</button>
+          <button disabled={busy} onClick={() => enable(optsNow())} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold disabled:opacity-50">Ενεργοποίηση συγχρονισμού</button>
         ) : (
           <>
-            <button disabled={busy} onClick={syncNow} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold disabled:opacity-50">Συγχρονισμός τώρα</button>
+            <button disabled={busy} onClick={() => syncNow(optsNow())} className="px-3 py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold disabled:opacity-50">Συγχρονισμός τώρα</button>
             <button disabled={busy} onClick={disable} className="px-3 py-2 rounded-lg border border-slate-300 text-sm">Απενεργοποίηση</button>
           </>
         )}
@@ -4391,7 +4631,7 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
-  const [adminCode, setAdminCode] = useStore("admin-code", "1234");
+  const [adminCode, setAdminCode] = useStore("admin-code", null);
   const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
 
   // Προστασία αντιστοίχισης ψυγείο→αισθητήρας: κρατιέται και σε ξεχωριστό κλειδί, ώστε αν χαθεί από τη λίστα σταθμών
@@ -4622,12 +4862,12 @@ function App() {
 
       <main className="max-w-2xl mx-auto p-4 pb-16 no-print">
         {tab === "employees" && (
-          <AdminGate code={adminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+          <AdminGate code={adminCode} setCode={setAdminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
             <EmployeesTab employees={employees} setEmployees={setEmployees} />
           </AdminGate>
         )}
         {tab === "training" && (
-          <AdminGate code={adminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+          <AdminGate code={adminCode} setCode={setAdminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
             <TrainingTab employees={employees} sessions={sessions} setSessions={setSessions} requestPrint={requestPrint} packageCompletions={packageCompletions} setPackageCompletions={setPackageCompletions} businessInfo={businessInfo} />
           </AdminGate>
         )}
