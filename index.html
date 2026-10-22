@@ -117,6 +117,7 @@ const Snowflake = makeIcon(<>
 const Droplet = makeIcon(<path d="M12 2s7 8.5 7 13a7 7 0 1 1-14 0c0-4.5 7-13 7-13Z" />);
 const Flame = makeIcon(<path d="M12 2c1 4-3 5-3 9a3 3 0 0 0 6 0c0-1-1-2-1-3 2 1 3 3 3 5a5 5 0 0 1-10 0c0-5 3-7 5-11Z" />);
 const ShieldCheck = makeIcon(<><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3Z" /><polyline points="9 12 11 14 15 10" /></>);
+const BarChart3 = makeIcon(<><line x1="4" y1="20" x2="20" y2="20" /><rect x="6" y="11" width="3" height="7" /><rect x="11" y="5" width="3" height="13" /><rect x="16" y="13" width="3" height="5" /></>);
 const FileSignature = makeIcon(<>
   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h6" /><polyline points="14 2 14 8 20 8" />
   <path d="M13 19c1.5-2 3.5-2 5 0" />
@@ -126,7 +127,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-22.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-22.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1772,8 +1773,8 @@ const focusCenter = (e) => {
 
 // Υπολογιστής (ποντίκι/πληκτρολόγιο): το Enter περνά στο επόμενο πεδίο του ταμείου, μέχρι το τέλος. Στο κινητό το αναλαμβάνει το πλήκτρο «Επόμενο» του πληκτρολογίου.
 const cashEnter = (e) => {
-  if (e.key !== "Enter" || e.isComposing) return;
-  try { if (!window.matchMedia("(pointer: fine)").matches) return; } catch (err) { return; }
+  // Υπολογιστής ΚΑΙ κινητό: το Enter / «Επόμενο» του πληκτρολογίου περνά στο επόμενο πεδίο
+  if ((e.key !== "Enter" && e.keyCode !== 13) || e.isComposing) return;
   e.preventDefault();
   const all = Array.from(document.querySelectorAll("input[data-cash]"));
   const i = all.indexOf(e.target);
@@ -3461,8 +3462,10 @@ function ThermoServerPanel({ config, setConfig }) {
 }
 
 // ---- Κωδικός διαχειριστή: αποθηκεύεται ΜΟΝΟ ως κατακερματισμός (PBKDF2), ποτέ ως απλό κείμενο ----
+// Όσο δεν έχει οριστεί δικός σου, ισχύει ο απλός «1234» (επιλογή του ιδιοκτήτη για ιδιωτική χρήση).
 const ADMIN_ITER = 200000;
-const ADMIN_MIN_LEN = 6;
+const ADMIN_MIN_LEN = 4;
+const ADMIN_DEFAULT = "1234";
 async function adminHash(code, saltB64) {
   const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(String(code)), "PBKDF2", false, ["deriveBits"]);
   const bits = await crypto.subtle.deriveBits({ name: "PBKDF2", salt: syncUnb64(saltB64), iterations: ADMIN_ITER, hash: "SHA-256" }, base, 256);
@@ -3472,32 +3475,53 @@ async function adminMake(code) {
   const salt = syncB64(crypto.getRandomValues(new Uint8Array(16)));
   return { v: 2, salt, hash: await adminHash(code, salt) };
 }
-// Επιστρέφει true/false. Παλιός κωδικός ως απλό κείμενο (string) συγκρίνεται και μετά αναβαθμίζεται.
+const adminIsUnset = (stored) => stored === null || stored === undefined || stored === "";
 async function adminCheck(code, stored) {
-  if (typeof stored === "string") return stored !== "" && code === stored;
+  if (adminIsUnset(stored)) return code === ADMIN_DEFAULT;
+  if (typeof stored === "string") return code === stored;
   if (stored && stored.v === 2 && stored.salt && stored.hash) {
     const h = await adminHash(code, stored.salt);
-    let d = 0;
     if (h.length !== stored.hash.length) return false;
+    let d = 0;
     for (let i = 0; i < h.length; i++) d |= h.charCodeAt(i) ^ stored.hash.charCodeAt(i);
     return d === 0;
   }
   return false;
 }
-const adminIsLegacyWeak = (stored) => typeof stored === "string" && (stored === "1234" || stored.length < ADMIN_MIN_LEN);
-const adminIsUnset = (stored) => stored === null || stored === undefined || stored === "";
-// Κλείδωμα μετά από λάθος προσπάθειες (δεν μπορεί να δοκιμαστεί ο ένας κωδικός μετά τον άλλον)
+// Κλειδί ανάκτησης: 16 χαρακτήρες (χωρίς δυσανάγνωστους), π.χ. K7M2-9XQD-4TPA-R6WH. Αποθηκεύεται μόνο ο κατακερματισμός του.
+const ADMIN_REC_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+function adminNewRecoveryKey() {
+  let out = "";
+  const buf = new Uint8Array(64);
+  crypto.getRandomValues(buf);
+  for (let i = 0; i < buf.length && out.length < 16; i++) {
+    if (buf[i] < 248) out += ADMIN_REC_ALPHABET[buf[i] % ADMIN_REC_ALPHABET.length]; // 248 = 31·8 (χωρίς μεροληψία)
+  }
+  return out.replace(/(.{4})(?=.)/g, "$1-");
+}
+const adminNormRec = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// Κλείδωμα μετά από λάθος προσπάθειες
 const ADMIN_LOCK_KEY = "brewtopia-admin-lock";
 function adminLockRead() { try { return JSON.parse(window.localStorage.getItem(ADMIN_LOCK_KEY) || "null") || { n: 0, until: 0 }; } catch (e) { return { n: 0, until: 0 }; } }
 function adminLockWrite(v) { try { window.localStorage.setItem(ADMIN_LOCK_KEY, JSON.stringify(v)); } catch (e) {} }
+function adminLockFail() {
+  const lock = adminLockRead();
+  const n = (lock.n || 0) + 1;
+  const until = n >= 5 ? Date.now() + Math.min(15 * 60, 30 * Math.pow(2, n - 5)) * 1000 : 0;
+  adminLockWrite({ n, until });
+  return n;
+}
 
-function AdminCodePanel({ code, setCode }) {
+function AdminCodePanel({ code, setCode, recovery, setRecovery }) {
   const [editing, setEditing] = useState(false);
   const [current, setCurrent] = useState("");
   const [draft, setDraft] = useState("");
   const [confirmDraft, setConfirmDraft] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [recMode, setRecMode] = useState(false);
+  const [recCurrent, setRecCurrent] = useState("");
+  const [recShown, setRecShown] = useState("");
   const unset = adminIsUnset(code);
 
   const startEdit = () => { setCurrent(""); setDraft(""); setConfirmDraft(""); setError(""); setEditing(true); };
@@ -3505,14 +3529,25 @@ function AdminCodePanel({ code, setCode }) {
   const save = async () => {
     if (busy) return;
     if (draft.length < ADMIN_MIN_LEN) { setError(`Ο κωδικός πρέπει να έχει τουλάχιστον ${ADMIN_MIN_LEN} χαρακτήρες.`); return; }
-    if (draft === "1234" || /^(.)\1+$/.test(draft)) { setError("Αυτός ο κωδικός είναι πολύ εύκολος."); return; }
     if (draft !== confirmDraft) { setError("Οι κωδικοί δεν ταιριάζουν."); return; }
     setBusy(true);
     try {
-      if (!unset && !(await adminCheck(current, code))) { setError("Ο τρέχων κωδικός δεν είναι σωστός."); return; }
+      if (!(await adminCheck(current, code))) { setError("Ο τρέχων κωδικός δεν είναι σωστός."); return; }
       setCode(await adminMake(draft));
       setEditing(false);
     } catch (e) { setError("Δεν ήταν δυνατή η αποθήκευση."); } finally { setBusy(false); }
+  };
+
+  const makeRecovery = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (!(await adminCheck(recCurrent, code))) { setError("Ο τρέχων κωδικός δεν είναι σωστός."); return; }
+      const key = adminNewRecoveryKey();
+      setRecovery(await adminMake(adminNormRec(key)));
+      setRecShown(key);
+      setRecCurrent(""); setError("");
+    } catch (e) { setError("Δεν ήταν δυνατή η δημιουργία."); } finally { setBusy(false); }
   };
 
   return (
@@ -3521,20 +3556,15 @@ function AdminCodePanel({ code, setCode }) {
         <ShieldCheck size={14} /> Κωδικός Διαχειριστή
       </p>
       <p className="text-xs text-slate-500 mb-2">
-        Ζητείται για να μπεις στις καρτέλες «Προσωπικό» και «Εκπαίδευση» — ώστε μόνο εσύ να τις βλέπεις. Αποθηκεύεται κατακερματισμένος (δεν διαβάζεται από κανέναν).
+        Ζητείται για να μπεις στις καρτέλες «Προσωπικό», «Εκπαίδευση» και «Αναφορές». Αποθηκεύεται κατακερματισμένος (δεν διαβάζεται από κανέναν).
       </p>
-      {unset && <p className="text-xs text-red-600 font-semibold mb-2">Δεν έχει οριστεί κωδικός. Όρισε έναν τώρα.</p>}
-      {adminIsLegacyWeak(code) && <p className="text-xs text-red-600 font-semibold mb-2">Ο κωδικός είναι ο παλιός/εύκολος. Άλλαξέ τον τώρα.</p>}
+      {unset && <p className="text-xs text-slate-600 mb-2">Τώρα ισχύει ο απλός κωδικός <b>1234</b>. Μπορείς να τον αλλάξεις όποτε θέλεις.</p>}
       {!editing ? (
-        <button onClick={startEdit} className="text-[11px] text-teal-700 underline">
-          {unset ? "Ορισμός κωδικού" : "Αλλαγή κωδικού"}
-        </button>
+        <button onClick={startEdit} className="text-[11px] text-teal-700 underline">Αλλαγή κωδικού</button>
       ) : (
         <div className="space-y-2">
-          {!unset && (
-            <input type="password" autoFocus placeholder="Τρέχων κωδικός" autoComplete="off"
-              className={inputCls + " max-w-[220px]"} value={current} onChange={(e) => { setCurrent(e.target.value); setError(""); }} />
-          )}
+          <input type="password" autoFocus placeholder={unset ? "Τρέχων κωδικός (1234)" : "Τρέχων κωδικός"} autoComplete="off"
+            className={inputCls + " max-w-[220px]"} value={current} onChange={(e) => { setCurrent(e.target.value); setError(""); }} />
           <input type="password" placeholder={`Νέος κωδικός (τουλάχιστον ${ADMIN_MIN_LEN})`} autoComplete="new-password"
             className={inputCls + " max-w-[220px]"} value={draft} onChange={(e) => { setDraft(e.target.value); setError(""); }} />
           <input type="password" placeholder="Επανάληψη νέου κωδικού" autoComplete="new-password"
@@ -3546,15 +3576,46 @@ function AdminCodePanel({ code, setCode }) {
           </div>
         </div>
       )}
+
+      <div className="mt-3 pt-3 border-t border-slate-200">
+        <p className="text-xs font-semibold text-slate-700 mb-1">Κλειδί ανάκτησης (αν ξεχάσεις τον κωδικό)</p>
+        <p className="text-[11px] text-slate-500 mb-2">
+          {recovery ? "Έχει δημιουργηθεί κλειδί ανάκτησης σε αυτή τη συσκευή. " : "Δεν έχει δημιουργηθεί ακόμα. "}
+          Γράψε το σε ασφαλές μέρος (π.χ. διαχειριστής κωδικών) — εμφανίζεται μόνο μία φορά και ισχύει μόνο για αυτή τη συσκευή.
+        </p>
+        {recShown ? (
+          <div className="rounded-lg border-2 border-amber-400 bg-amber-50 p-3">
+            <p className="text-[11px] text-amber-800 font-semibold mb-1">Το κλειδί ανάκτησης (γράψ' το τώρα — δεν θα ξαναφανεί):</p>
+            <p className="text-lg font-mono font-bold tracking-wider text-slate-900 select-all">{recShown}</p>
+            <button onClick={() => setRecShown("")} className="mt-2 text-[11px] border border-slate-300 rounded px-2 py-1">Το έγραψα</button>
+          </div>
+        ) : !recMode ? (
+          <button onClick={() => { setRecMode(true); setError(""); }} className="text-[11px] text-teal-700 underline">
+            {recovery ? "Δημιουργία νέου κλειδιού ανάκτησης" : "Δημιουργία κλειδιού ανάκτησης"}
+          </button>
+        ) : (
+          <div className="space-y-2">
+            <input type="password" placeholder="Τρέχων κωδικός διαχειριστή" autoComplete="off" className={inputCls + " max-w-[220px]"}
+              value={recCurrent} onChange={(e) => { setRecCurrent(e.target.value); setError(""); }} />
+            {error && <p className="text-xs text-red-600">{error}</p>}
+            <div className="flex items-center gap-2">
+              <button disabled={busy} onClick={makeRecovery} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50">Δημιουργία</button>
+              <button onClick={() => { setRecMode(false); setError(""); }} className="border border-slate-300 px-3 py-2 rounded-lg text-xs">Άκυρο</button>
+            </div>
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
 
-function AdminGate({ code, setCode, unlocked, setUnlocked, children }) {
+function AdminGate({ code, setCode, recovery, unlocked, setUnlocked, children }) {
   const [input, setInput] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mustSet, setMustSet] = useState(false);
+  const [forgot, setForgot] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [recIn, setRecIn] = useState("");
   const [n1, setN1] = useState("");
   const [n2, setN2] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -3562,24 +3623,22 @@ function AdminGate({ code, setCode, unlocked, setUnlocked, children }) {
   const lock = adminLockRead();
   const waitSec = Math.max(0, Math.ceil((lock.until - now) / 1000));
 
+  if (unlocked && !resetting) return children;
+
   const setNew = async (e) => {
     e.preventDefault();
     if (n1.length < ADMIN_MIN_LEN) { setError(`Τουλάχιστον ${ADMIN_MIN_LEN} χαρακτήρες.`); return; }
-    if (n1 === "1234" || /^(.)\1+$/.test(n1)) { setError("Πολύ εύκολος κωδικός."); return; }
     if (n1 !== n2) { setError("Οι κωδικοί δεν ταιριάζουν."); return; }
     setBusy(true);
-    try { setCode(await adminMake(n1)); adminLockWrite({ n: 0, until: 0 }); setMustSet(false); setUnlocked(true); }
+    try { setCode(await adminMake(n1)); adminLockWrite({ n: 0, until: 0 }); setResetting(false); setForgot(false); setUnlocked(true); }
     catch (err) { setError("Δεν ήταν δυνατή η αποθήκευση."); } finally { setBusy(false); }
   };
 
-  if (unlocked && !mustSet) return children;
-
-  // πρώτη φορά (δεν υπάρχει κωδικός) ή υποχρεωτική αλλαγή του παλιού «1234»
-  if (adminIsUnset(code) || mustSet) {
+  if (resetting) {
     return (
       <Card>
-        <p className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-1.5"><ShieldCheck size={16} /> Όρισε κωδικό διαχειριστή</p>
-        <p className="text-xs text-slate-500 mb-3">Για την ασφάλεια των στοιχείων του προσωπικού χρειάζεται δικός σου κωδικός (τουλάχιστον {ADMIN_MIN_LEN} χαρακτήρες).</p>
+        <p className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-1.5"><ShieldCheck size={16} /> Όρισε νέο κωδικό διαχειριστή</p>
+        <p className="text-xs text-slate-500 mb-3">Το κλειδί ανάκτησης έγινε δεκτό. Βάλε νέο κωδικό (τουλάχιστον {ADMIN_MIN_LEN} χαρακτήρες).</p>
         <form onSubmit={setNew} className="space-y-2">
           <input type="password" autoFocus autoComplete="new-password" className={`${inputCls} max-w-[220px]`} placeholder="Νέος κωδικός" value={n1} onChange={(e) => { setN1(e.target.value); setError(""); }} />
           <input type="password" autoComplete="new-password" className={`${inputCls} max-w-[220px]`} placeholder="Επανάληψη" value={n2} onChange={(e) => { setN2(e.target.value); setError(""); }} />
@@ -3598,19 +3657,55 @@ function AdminGate({ code, setCode, unlocked, setUnlocked, children }) {
       if (await adminCheck(input, code)) {
         adminLockWrite({ n: 0, until: 0 });
         setError("");
-        if (adminIsLegacyWeak(code)) { setMustSet(true); setUnlocked(false); }
-        else {
-          if (typeof code === "string") { try { setCode(await adminMake(input)); } catch (err) { /* μένει ο παλιός μέχρι την επόμενη φορά */ } }
-          setUnlocked(true);
-        }
+        if (typeof code === "string" && code !== "") { try { setCode(await adminMake(input)); } catch (err) { /* μένει ο παλιός */ } }
+        setUnlocked(true);
       } else {
-        const n = (lock.n || 0) + 1;
-        const until = n >= 5 ? Date.now() + Math.min(15 * 60, 30 * Math.pow(2, n - 5)) * 1000 : 0;
-        adminLockWrite({ n, until });
+        const n = adminLockFail();
         setError(n >= 5 ? "Πολλές λάθος προσπάθειες — περίμενε." : "Λάθος κωδικός.");
       }
     } catch (err) { setError("Δεν ήταν δυνατός ο έλεγχος."); } finally { setBusy(false); setInput(""); }
   };
+
+  const tryRecovery = async (e) => {
+    e.preventDefault();
+    if (busy || waitSec > 0) return;
+    setBusy(true);
+    try {
+      if (recovery && recovery.v === 2 && (await adminCheck(adminNormRec(recIn), recovery))) {
+        adminLockWrite({ n: 0, until: 0 });
+        setError(""); setResetting(true);
+      } else {
+        const n = adminLockFail();
+        setError(n >= 5 ? "Πολλές λάθος προσπάθειες — περίμενε." : "Το κλειδί ανάκτησης δεν είναι σωστό.");
+      }
+    } catch (err) { setError("Δεν ήταν δυνατός ο έλεγχος."); } finally { setBusy(false); setRecIn(""); }
+  };
+
+  if (forgot) {
+    return (
+      <Card>
+        <p className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-1.5"><ShieldCheck size={16} /> Ξέχασα τον κωδικό</p>
+        {recovery ? (
+          <>
+            <p className="text-xs text-slate-500 mb-3">Γράψε το κλειδί ανάκτησης που είχες σημειώσει (π.χ. K7M2-9XQD-4TPA-R6WH).</p>
+            <form onSubmit={tryRecovery} className="flex items-center gap-2">
+              <input autoFocus autoComplete="off" autoCapitalize="characters" value={recIn} onChange={(e) => { setRecIn(e.target.value); setError(""); }}
+                className={`${inputCls} max-w-[240px] font-mono`} placeholder="Κλειδί ανάκτησης" />
+              <button type="submit" disabled={busy || waitSec > 0} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">OK</button>
+            </form>
+          </>
+        ) : (
+          <p className="text-xs text-slate-600 mb-1">
+            Σε αυτή τη συσκευή δεν έχει δημιουργηθεί κλειδί ανάκτησης. Δοκίμασε τον απλό κωδικό <b>1234</b> ή τον κωδικό που είχες βάλει.
+            Αν είσαι ήδη μέσα σε άλλη συσκευή σου, πήγαινε Αρχείο → Κωδικός Διαχειριστή και δημιούργησε κλειδί ανάκτησης για να το έχεις την επόμενη φορά.
+          </p>
+        )}
+        {waitSec > 0 && <p className="text-xs text-red-600 mt-2">Κλειδώθηκε για {waitSec} δευτερόλεπτα.</p>}
+        {error && waitSec === 0 && <p className="text-xs text-red-600 mt-2">{error}</p>}
+        <button onClick={() => { setForgot(false); setError(""); }} className="mt-3 text-[11px] text-teal-700 underline">Πίσω</button>
+      </Card>
+    );
+  }
 
   return (
     <Card>
@@ -3631,7 +3726,260 @@ function AdminGate({ code, setCode, unlocked, setUnlocked, children }) {
       </form>
       {waitSec > 0 && <p className="text-xs text-red-600 mt-2">Κλειδώθηκε για {waitSec} δευτερόλεπτα.</p>}
       {error && waitSec === 0 && <p className="text-xs text-red-600 mt-2">{error}</p>}
+      <button onClick={() => { setForgot(true); setError(""); }} className="mt-3 text-[11px] text-slate-500 underline">Ξέχασα τον κωδικό</button>
     </Card>
+  );
+}
+
+/* ============================================================
+   ΑΝΑΦΟΡΕΣ ΤΑΜΕΙΟΥ (μόνο διαχειριστής)
+   ============================================================ */
+const CASH_RESERVED_KEYS = ["pos1", "pos2", "invoices", "notes", "_display"];
+const cashIsDenomKey = (k) => /^d\d+(_\d+)?$/.test(k);
+const cashFmtPlain = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+
+function cashSummarizeShift(sh, platIds) {
+  const cash = CASH_NOTES.concat(CASH_COINS).reduce((a, d) => a + cashCents(cashNum(sh["d" + String(d).replace(".", "_")]) * d), 0);
+  const vals = { cash, pos1: cashCents(cashNum(sh.pos1)), pos2: cashCents(cashNum(sh.pos2)), invoices: cashCents(cashNum(sh.invoices)) };
+  platIds.forEach((id) => { vals[id] = cashCents(cashNum(sh[id])); });
+  return vals;
+}
+
+function CashReportsTab({ cashData, cashPlatforms, shiftNames }) {
+  const today = todayISO();
+  const [mode, setMode] = useState("month"); // day | month | year | range
+  const [dayV, setDayV] = useState(today);
+  const [monthV, setMonthV] = useState(today.slice(0, 7));
+  const [yearV, setYearV] = useState(today.slice(0, 4));
+  const [fromV, setFromV] = useState(today.slice(0, 8) + "01");
+  const [toV, setToV] = useState(today);
+  const [shiftF, setShiftF] = useState("all");
+  const [offCats, setOffCats] = useState([]); // κατηγορίες που ΔΕΝ περιλαμβάνονται
+
+  // όλες οι υπηρεσίες: από τη λίστα + όσα κλειδιά υπάρχουν στα δεδομένα
+  const platItems = Array.isArray(cashPlatforms?.items) ? cashPlatforms.items.filter((x) => x && x.id) : CASH_PLATFORMS_DEFAULT.items;
+  const platNames = {};
+  platItems.forEach((x) => { platNames[x.id] = x.name || x.id; });
+  const platIdsSet = new Set(platItems.map((x) => x.id));
+  const rows = []; // { date, shift, vals }
+  const months = cashData && typeof cashData === "object" ? cashData : {};
+  Object.keys(months).forEach((mk) => {
+    const days = months[mk];
+    if (!days || typeof days !== "object") return;
+    Object.keys(days).forEach((date) => {
+      const shifts = days[date];
+      if (!shifts || typeof shifts !== "object") return;
+      Object.keys(shifts).forEach((sh) => {
+        const d = shifts[sh];
+        if (!d || typeof d !== "object") return;
+        Object.keys(d).forEach((k) => {
+          if (!CASH_RESERVED_KEYS.includes(k) && !cashIsDenomKey(k) && d[k] !== CASH_CLEARED && cashNum(d[k]) > 0) platIdsSet.add(k);
+        });
+      });
+    });
+  });
+  const platIds = Array.from(platIdsSet);
+  Object.keys(months).forEach((mk) => {
+    const days = months[mk];
+    if (!days || typeof days !== "object") return;
+    Object.keys(days).forEach((date) => {
+      const shifts = days[date];
+      if (!shifts || typeof shifts !== "object") return;
+      Object.keys(shifts).forEach((sh) => {
+        const d = shifts[sh];
+        if (!d || typeof d !== "object") return;
+        rows.push({ date, shift: sh, vals: cashSummarizeShift(d, platIds) });
+      });
+    });
+  });
+
+  const cats = [
+    { id: "cash", name: "Μετρητά" }, { id: "pos1", name: "Κάρτες POS 1" }, { id: "pos2", name: "Κάρτες POS 2" },
+    ...platIds.map((id) => ({ id, name: platNames[id] || id })),
+    { id: "invoices", name: "Τιμολόγια" },
+  ];
+  const activeCats = cats.filter((c) => !offCats.includes(c.id));
+  const toggleCat = (id) => setOffCats((o) => (o.includes(id) ? o.filter((x) => x !== id) : [...o, id]));
+
+  // περίοδος
+  let from = "0000-00-00", to = "9999-99-99", periodLabel = "";
+  if (mode === "day") { from = to = dayV; periodLabel = dayV; }
+  else if (mode === "month") { from = monthV + "-01"; to = monthV + "-31"; periodLabel = monthV; }
+  else if (mode === "year") { from = yearV + "-01-01"; to = yearV + "-12-31"; periodLabel = yearV; }
+  else { from = fromV; to = toV; periodLabel = fromV + " έως " + toV; }
+  const inPeriod = rows.filter((r) => r.date >= from && r.date <= to && (shiftF === "all" || r.shift === shiftF));
+
+  const sumOf = (vals) => activeCats.reduce((a, c) => a + (vals[c.id] || 0), 0);
+  const groupBy = mode === "year" ? "month" : "day";
+  const groups = {};
+  inPeriod.forEach((r) => {
+    const g = groupBy === "month" ? r.date.slice(0, 7) : r.date;
+    if (!groups[g]) groups[g] = { key: g, vals: {}, total: 0 };
+    cats.forEach((c) => { groups[g].vals[c.id] = (groups[g].vals[c.id] || 0) + (r.vals[c.id] || 0); });
+  });
+  const groupList = Object.values(groups).sort((a, b) => (a.key < b.key ? -1 : 1));
+  groupList.forEach((g) => { g.total = sumOf(g.vals); });
+  const grand = groupList.reduce((a, g) => a + g.total, 0);
+  const dayKeys = new Set(inPeriod.map((r) => r.date));
+  const dayTotals = {};
+  inPeriod.forEach((r) => { dayTotals[r.date] = (dayTotals[r.date] || 0) + sumOf(r.vals); });
+  const nDays = dayKeys.size;
+  const best = Object.keys(dayTotals).sort((a, b) => dayTotals[b] - dayTotals[a])[0];
+  const catTotals = cats.map((c) => ({ ...c, total: inPeriod.reduce((a, r) => a + (r.vals[c.id] || 0), 0) }));
+  const shiftTotals = SHIFTS.map((s) => ({ id: s, total: rows.filter((r) => r.date >= from && r.date <= to && r.shift === s).reduce((a, r) => a + sumOf(r.vals), 0) }));
+  const maxGroup = Math.max(1, ...groupList.map((g) => g.total));
+  const maxCat = Math.max(1, ...catTotals.map((c) => c.total));
+  const shLabel = (s) => (shiftNames && shiftNames[s]) || s;
+  const fmtGroupKey = (k) => {
+    if (groupBy === "month") return k;
+    const [y, m, d] = k.split("-");
+    return `${d}/${m}/${y}`;
+  };
+
+  const exportCsv = () => {
+    const header = ["Ημερομηνία", "Βάρδια", ...activeCats.map((c) => c.name), "Σύνολο"];
+    const lines = [header];
+    inPeriod.slice().sort((a, b) => (a.date + a.shift < b.date + b.shift ? -1 : 1)).forEach((r) => {
+      lines.push([r.date, shLabel(r.shift), ...activeCats.map((c) => cashFmtPlain(r.vals[c.id] || 0)), cashFmtPlain(sumOf(r.vals))]);
+    });
+    const csv = lines.map((l) => l.map((x) => `"${String(x).replace(/"/g, '""')}"`).join(";")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `tameio-${periodLabel.replace(/[^0-9a-zA-Z-]+/g, "_")}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  };
+
+  const chip = (on, onClick, label) => (
+    <button key={label} onClick={onClick} className={`text-[11px] px-2.5 py-1 rounded-full border ${on ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-500 bg-white"}`}>{label}</button>
+  );
+
+  return (
+    <div>
+      <SectionTitle icon={BarChart3} sub="Σύνολα ταμείου ανά ημέρα, μήνα ή έτος — με φίλτρα βάρδιας και κατηγορίας. Μόνο για τον διαχειριστή.">
+        Αναφορές ταμείου
+      </SectionTitle>
+
+      <Card className="mb-4">
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-700 mb-2">Περίοδος</p>
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {[["day", "Ημέρα"], ["month", "Μήνας"], ["year", "Έτος"], ["range", "Από–Έως"]].map(([id, l]) => chip(mode === id, () => setMode(id), l))}
+        </div>
+        {mode === "day" && <input type="date" className={inputCls + " max-w-[200px]"} value={dayV} onChange={(e) => setDayV(e.target.value)} />}
+        {mode === "month" && <input type="month" className={inputCls + " max-w-[200px]"} value={monthV} onChange={(e) => setMonthV(e.target.value)} />}
+        {mode === "year" && <input type="number" min="2000" max="2100" className={inputCls + " max-w-[120px]"} value={yearV} onChange={(e) => setYearV(e.target.value)} />}
+        {mode === "range" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="date" className={inputCls + " max-w-[170px]"} value={fromV} onChange={(e) => setFromV(e.target.value)} />
+            <span className="text-xs text-slate-500">έως</span>
+            <input type="date" className={inputCls + " max-w-[170px]"} value={toV} onChange={(e) => setToV(e.target.value)} />
+          </div>
+        )}
+
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-700 mt-3 mb-2">Βάρδια</p>
+        <div className="flex flex-wrap gap-1.5">
+          {chip(shiftF === "all", () => setShiftF("all"), "Όλες")}
+          {SHIFTS.map((s) => chip(shiftF === s, () => setShiftF(s), shLabel(s)))}
+        </div>
+
+        <p className="text-xs font-bold uppercase tracking-wide text-slate-700 mt-3 mb-2">Κατηγορίες (πάτα για να τις βάλεις/βγάλεις από το σύνολο)</p>
+        <div className="flex flex-wrap gap-1.5">
+          {cats.map((c) => chip(!offCats.includes(c.id), () => toggleCat(c.id), c.name))}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-2 gap-2 mb-4">
+        <div className="rounded-xl bg-gradient-to-b from-emerald-600 to-emerald-800 text-white p-3 col-span-2 shadow">
+          <p className="text-[11px] opacity-90">Σύνολο ({periodLabel})</p>
+          <p className="text-2xl font-extrabold">{cashFmt(grand)}</p>
+        </div>
+        <div className="rounded-xl bg-white border border-slate-200 p-3">
+          <p className="text-[11px] text-slate-500">Ημέρες με καταχώρηση</p>
+          <p className="text-lg font-bold text-slate-800">{nDays}</p>
+        </div>
+        <div className="rounded-xl bg-white border border-slate-200 p-3">
+          <p className="text-[11px] text-slate-500">Μέσος όρος ανά ημέρα</p>
+          <p className="text-lg font-bold text-slate-800">{nDays ? cashFmt(Math.round(grand / nDays)) : "—"}</p>
+        </div>
+        <div className="rounded-xl bg-white border border-slate-200 p-3 col-span-2">
+          <p className="text-[11px] text-slate-500">Καλύτερη ημέρα</p>
+          <p className="text-sm font-bold text-slate-800">{best ? `${fmtGroupKey(best)} — ${cashFmt(dayTotals[best])}` : "—"}</p>
+        </div>
+      </div>
+
+      {inPeriod.length === 0 && (
+        <Card className="mb-4"><p className="text-sm text-slate-500">Δεν υπάρχουν καταχωρήσεις ταμείου για αυτή την περίοδο και τα φίλτρα.</p></Card>
+      )}
+
+      {inPeriod.length > 0 && (
+        <>
+          <Card className="mb-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-700 mb-2">Ανά κατηγορία</p>
+            <div className="space-y-1.5">
+              {catTotals.map((c) => (
+                <div key={c.id} className={offCats.includes(c.id) ? "opacity-40" : ""}>
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-slate-700">{c.name}</span>
+                    <span className="font-semibold text-slate-800">{cashFmt(c.total)}{!offCats.includes(c.id) && grand > 0 ? ` · ${Math.round((c.total / grand) * 100)}%` : ""}</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-100 rounded"><div className="h-1.5 bg-teal-600 rounded" style={{ width: `${Math.round((c.total / maxCat) * 100)}%` }} /></div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="mb-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-slate-700 mb-2">Ανά βάρδια (σε όλη την περίοδο)</p>
+            <div className="space-y-1">
+              {shiftTotals.map((s) => (
+                <div key={s.id} className="flex items-center justify-between text-xs">
+                  <span className="text-slate-700">{shLabel(s.id)}</span>
+                  <span className="font-semibold text-slate-800">{cashFmt(s.total)}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card className="mb-4">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-700">{groupBy === "month" ? "Ανά μήνα" : "Ανά ημέρα"}</p>
+              <button onClick={exportCsv} className="text-[11px] bg-slate-800 text-white px-3 py-1.5 rounded-lg font-semibold">⬇ Εξαγωγή σε Excel (CSV)</button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="text-[11px] border-collapse w-full min-w-[420px]">
+                <thead>
+                  <tr className="text-left text-slate-500">
+                    <th className="py-1 pr-2">{groupBy === "month" ? "Μήνας" : "Ημέρα"}</th>
+                    {activeCats.map((c) => <th key={c.id} className="py-1 px-1 text-right whitespace-nowrap">{c.name}</th>)}
+                    <th className="py-1 pl-2 text-right">Σύνολο</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groupList.map((g) => (
+                    <tr key={g.key} className="border-t border-slate-100">
+                      <td className="py-1 pr-2 whitespace-nowrap font-semibold text-slate-700">{fmtGroupKey(g.key)}</td>
+                      {activeCats.map((c) => <td key={c.id} className="py-1 px-1 text-right text-slate-600 whitespace-nowrap">{g.vals[c.id] ? cashFmtPlain(g.vals[c.id]) : "—"}</td>)}
+                      <td className="py-1 pl-2 text-right font-bold text-slate-900 whitespace-nowrap">
+                        {cashFmtPlain(g.total)}
+                        <div className="h-1 bg-teal-100 rounded mt-0.5"><div className="h-1 bg-teal-600 rounded" style={{ width: `${Math.round((g.total / maxGroup) * 100)}%` }} /></div>
+                      </td>
+                    </tr>
+                  ))}
+                  <tr className="border-t-2 border-slate-300 font-bold">
+                    <td className="py-1 pr-2">Σύνολο</td>
+                    {activeCats.map((c) => <td key={c.id} className="py-1 px-1 text-right whitespace-nowrap">{cashFmtPlain(groupList.reduce((a, g) => a + (g.vals[c.id] || 0), 0))}</td>)}
+                    <td className="py-1 pl-2 text-right whitespace-nowrap">{cashFmtPlain(grand)}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] text-slate-400 mt-2">Σύνολο = μετρητά + κάρτες + υπηρεσίες + τιμολόγια (όσες κατηγορίες είναι ενεργές παραπάνω). Οι τιμές είναι ό,τι έχει καταχωρηθεί στην καρτέλα «Ταμείο».</p>
+          </Card>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -3898,7 +4246,7 @@ function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, o
   );
 }
 
-function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig, sync }) {
+function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, adminRecovery, setAdminRecovery, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig, sync }) {
   const [form, setForm] = useState(null);
 
   const startNew = () => setForm({ id: uid(), code: "", from: "", to: "", destroyDate: "", notes: "", responsible: "" });
@@ -3920,7 +4268,7 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
 
       <ThermoServerPanel config={thermoConfig} setConfig={setThermoConfig} />
 
-      <AdminCodePanel code={adminCode} setCode={setAdminCode} />
+      <AdminCodePanel code={adminCode} setCode={setAdminCode} recovery={adminRecovery} setRecovery={setAdminRecovery} />
 
       {sync && <SyncPanel sync={sync} />}
 
@@ -4645,6 +4993,7 @@ function App() {
   }, []);
   const [technicianVisits, setTechnicianVisits] = useStore("technician-visits", []);
   const [adminCode, setAdminCode] = useStore("admin-code", null);
+  const [adminRecovery, setAdminRecovery] = useStore("admin-recovery", null);
   const [safetyTechnician, setSafetyTechnician] = useStore("safety-technician", {});
 
   // Προστασία αντιστοίχισης ψυγείο→αισθητήρας: κρατιέται και σε ξεχωριστό κλειδί, ώστε αν χαθεί από τη λίστα σταθμών
@@ -4686,7 +5035,7 @@ function App() {
   const adminLeftAtRef = useRef(null);
   const prevTabRef = useRef(tab);
   useEffect(() => {
-    const isAdminTab = (t) => t === "employees" || t === "training";
+    const isAdminTab = (t) => t === "employees" || t === "training" || t === "reports";
     const wasAdmin = isAdminTab(prevTabRef.current);
     const isAdmin = isAdminTab(tab);
     if (wasAdmin && !isAdmin) {
@@ -4824,13 +5173,18 @@ function App() {
     return !e.departureDate && e.healthExpiry && d >= 0 && d <= HEALTH_WARN_DAYS;
   });
 
+  // Συσκευή προσωπικού (τσεκαρισμένη στο πάνελ συγχρονισμού): δεν έχει καθόλου τις καρτέλες διαχειριστή
+  const staffDevice = !!(sync && sync.device && sync.device.noPersonal);
+  const adminOnlyTabs = ["employees", "training", "reports"];
+  useEffect(() => { if (staffDevice && adminOnlyTabs.includes(tab)) setTab("daily"); }, [staffDevice, tab]);
   const tabs = [
     { id: "daily", label: "Καταγραφές", icon: ClipboardList },
     { id: "employees", label: "Προσωπικό", icon: Users },
     { id: "training", label: "Εκπαίδευση", icon: GraduationCap },
+    { id: "reports", label: "Αναφορές", icon: BarChart3 },
     { id: "haccp", label: "HACCP", icon: GitBranch },
     { id: "archive", label: "Αρχείο", icon: Archive },
-  ];
+  ].filter((t) => !(staffDevice && adminOnlyTabs.includes(t.id)));
 
   return (
     <div className="min-h-screen bg-[#F7F5F0] text-slate-800" style={{ fontFamily: "ui-sans-serif, system-ui, sans-serif" }}>
@@ -4875,13 +5229,18 @@ function App() {
 
       <main className="max-w-2xl mx-auto p-4 pb-16 no-print">
         {tab === "employees" && (
-          <AdminGate code={adminCode} setCode={setAdminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+          <AdminGate code={adminCode} setCode={setAdminCode} recovery={adminRecovery} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
             <EmployeesTab employees={employees} setEmployees={setEmployees} />
           </AdminGate>
         )}
         {tab === "training" && (
-          <AdminGate code={adminCode} setCode={setAdminCode} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+          <AdminGate code={adminCode} setCode={setAdminCode} recovery={adminRecovery} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
             <TrainingTab employees={employees} sessions={sessions} setSessions={setSessions} requestPrint={requestPrint} packageCompletions={packageCompletions} setPackageCompletions={setPackageCompletions} businessInfo={businessInfo} />
+          </AdminGate>
+        )}
+        {tab === "reports" && !staffDevice && (
+          <AdminGate code={adminCode} setCode={setAdminCode} recovery={adminRecovery} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+            <CashReportsTab cashData={cashData} cashPlatforms={cashPlatforms} shiftNames={shiftNames} />
           </AdminGate>
         )}
         {tab === "daily" && (
@@ -4912,7 +5271,7 @@ function App() {
             oilData={oilData} setOilData={setOilData}
             businessInfo={businessInfo} setBusinessInfo={setBusinessInfo}
             technicianVisits={technicianVisits} setTechnicianVisits={setTechnicianVisits}
-            adminCode={adminCode} setAdminCode={setAdminCode}
+            adminCode={adminCode} setAdminCode={setAdminCode} adminRecovery={adminRecovery} setAdminRecovery={setAdminRecovery}
             safetyTechnician={safetyTechnician} setSafetyTechnician={setSafetyTechnician}
             thermoConfig={thermoConfig} setThermoConfig={setThermoConfig}
             sync={sync}
