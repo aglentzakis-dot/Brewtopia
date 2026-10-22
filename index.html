@@ -126,7 +126,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-22.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-22.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -2118,6 +2118,9 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   // --- ThermoServer (αυτόματες θερμοκρασίες Zigbee) ---
   const [thermoStatus, setThermoStatus] = useState(null); // null | "loading" | "ok" | "error"
   const [thermoDevices, setThermoDevices] = useState([]);
+  const [thermoMeasTs, setThermoMeasTs] = useState({}); // { stationId: ώρα μέτρησης (ms) } από το ThermoServer
+  const [thermoNow, setThermoNow] = useState(Date.now());
+  useEffect(() => { const t = setInterval(() => setThermoNow(Date.now()), 30000); return () => clearInterval(t); }, []);
   const [devicesStatus, setDevicesStatus] = useState(null);
   const [thermoCode, setThermoCode] = useState(null);
 
@@ -2173,6 +2176,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       next[mk] = next[mk] || {};
       next[mk][date] = next[mk][date] || {};
       next[mk][date][shift] = { ...next[mk][date][shift] };
+      const measTs = {};
       stations.forEach((st) => {
         if (!st.sensorId) return;
         const reading = lookup[st.sensorId];
@@ -2180,8 +2184,11 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         if (t !== undefined && t !== null) {
           next[mk][date][shift][st.id] = String(t);
           matched++;
+          if (typeof reading?.ts === "number") measTs[st.id] = reading.ts;
         }
       });
+      setThermoMeasTs(measTs);
+      setThermoNow(Date.now());
       setCcpData(next);
       if (matched > 0) setThermoStatus("ok");
       else if (!anyMapped) setThermoStatus("no-sensors");
@@ -2448,6 +2455,12 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                       <span className="text-sm text-slate-700 flex items-center gap-1.5">
                         {st.type !== "dry" && <Snowflake size={13} className={st.type === "freezer" ? "text-sky-500" : "text-teal-500"} />}
                         {st.name}
+                        {thermoMeasTs[st.id] && (() => {
+                          const mins = Math.max(0, Math.round((thermoNow - thermoMeasTs[st.id]) / 60000));
+                          const cls = mins >= 75 ? "text-red-600 font-semibold" : mins >= 30 ? "text-amber-600 font-semibold" : "text-slate-400";
+                          const txt = mins < 1 ? "μόλις τώρα" : mins < 60 ? `πριν από ${mins} λεπτά` : `πριν από ${Math.floor(mins / 60)} ώρ. ${mins % 60} λεπτά`;
+                          return <span className={`text-[10px] ${cls}`}>· μέτρηση {txt}{mins >= 30 ? " ⚠" : ""}</span>;
+                        })()}
                       </span>
                       <div className="flex items-center gap-2">
                         {st.type !== "dry" && (
