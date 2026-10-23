@@ -118,6 +118,7 @@ const Droplet = makeIcon(<path d="M12 2s7 8.5 7 13a7 7 0 1 1-14 0c0-4.5 7-13 7-1
 const Flame = makeIcon(<path d="M12 2c1 4-3 5-3 9a3 3 0 0 0 6 0c0-1-1-2-1-3 2 1 3 3 3 5a5 5 0 0 1-10 0c0-5 3-7 5-11Z" />);
 const ShieldCheck = makeIcon(<><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5l-8-3Z" /><polyline points="9 12 11 14 15 10" /></>);
 const BarChart3 = makeIcon(<><line x1="4" y1="20" x2="20" y2="20" /><rect x="6" y="11" width="3" height="7" /><rect x="11" y="5" width="3" height="13" /><rect x="16" y="13" width="3" height="5" /></>);
+const Cog = makeIcon(<><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1" /></>);
 const FileSignature = makeIcon(<>
   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h6" /><polyline points="14 2 14 8 20 8" />
   <path d="M13 19c1.5-2 3.5-2 5 0" />
@@ -127,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.3"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -169,7 +170,7 @@ async function idbSetBrewtopia(key, value) {
 
 // Cloudflare Access — κλειδί σύνδεσης με το ThermoServer (μέσω Cloudflare Tunnel).
 // ΑΣΦΑΛΕΙΑ: το κλειδί ΔΕΝ γράφεται ποτέ μέσα στον κώδικα (ο κώδικας είναι δημόσιος στο GitHub).
-// Το περνάει ο χρήστης μία φορά σε κάθε συσκευή (Αρχείο → ThermoServer) και μένει ΜΟΝΟ σε αυτή τη συσκευή,
+// Το περνάει ο χρήστης μία φορά σε κάθε συσκευή (Ρυθμίσεις → ThermoServer) και μένει ΜΟΝΟ σε αυτή τη συσκευή,
 // σε ξεχωριστό κλειδί αποθήκευσης που δεν μπαίνει ποτέ σε αντίγραφα, συγχρονισμό ή εξαγωγές.
 const THERMO_DEFAULT_URL = "https://thermo.glenapps.gr";
 const THERMO_KEY_STORAGE = "brewtopia-local-only:thermo-access-key";
@@ -2506,10 +2507,10 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                 <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε τη διεύθυνση ή το δίκτυο.</p>
               )}
               {thermoStatus === "no-key" && (
-                <p className="text-[11px] text-red-600 mt-1">Δεν έχει οριστεί κλειδί ThermoServer σε αυτή τη συσκευή. Πήγαινε στο Αρχείο → ThermoServer → «Επεξεργασία» και πέρασε το κλειδί. Μέχρι τότε, οι θερμοκρασίες μπαίνουν με το χέρι.</p>
+                <p className="text-[11px] text-red-600 mt-1">Δεν έχει οριστεί κλειδί ThermoServer σε αυτή τη συσκευή. Πήγαινε στο Ρυθμίσεις → ThermoServer → «Επεξεργασία» και πέρασε το κλειδί. Μέχρι τότε, οι θερμοκρασίες μπαίνουν με το χέρι.</p>
               )}
               {thermoStatus === "error-blocked" && (
-                <p className="text-[11px] text-red-600 mt-1">Ο διακομιστής ανταποκρίνεται, αλλά το Cloudflare αρνείται το αίτημα. Συνήθως σημαίνει λάθος ή παλιό κλειδί σε αυτή τη συσκευή (Αρχείο → ThermoServer → «Δοκιμή σύνδεσης»).</p>
+                <p className="text-[11px] text-red-600 mt-1">Ο διακομιστής ανταποκρίνεται, αλλά το Cloudflare αρνείται το αίτημα. Συνήθως σημαίνει λάθος ή παλιό κλειδί σε αυτή τη συσκευή (Ρυθμίσεις → ThermoServer → «Δοκιμή σύνδεσης»).</p>
               )}
               {thermoStatus === "error-unreachable" && (
                 <p className="text-[11px] text-red-600 mt-1">Δεν βρέθηκε ο διακομιστής. Έλεγξε ότι έχεις internet, ότι το PC του μαγαζιού είναι ανοιχτό και ότι τρέχει το Cloudflare Tunnel.</p>
@@ -3612,6 +3613,33 @@ function adminNewRecoveryKey() {
   return out.replace(/(.{4})(?=.)/g, "$1-");
 }
 const adminNormRec = (s) => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+// E-mail ανάκτησης: η εφαρμογή δεν έχει διακομιστή, άρα ΔΕΝ στέλνει μήνυμα. Η επαναφορά γίνεται αποδεικνύοντας ότι
+// έχεις πρόσβαση στον λογαριασμό Google (ο ίδιος που ορίστηκε ως «e-mail ανάκτησης», ή που είναι συνδεδεμένος στον συγχρονισμό).
+const ADMIN_OWNER_KEY = "brewtopia-admin-owner-email";
+function adminOwnerEmail() {
+  try {
+    const own = window.localStorage.getItem(ADMIN_OWNER_KEY);
+    if (own) return String(JSON.parse(own) || "").toLowerCase();
+    const acc = JSON.parse(window.localStorage.getItem("brewtopia-sync-account") || "null");
+    return acc && acc.email ? String(acc.email).toLowerCase() : "";
+  } catch (e) { return ""; }
+}
+const adminMaskEmail = (m) => { const [a, b] = String(m || "").split("@"); return a && b ? a.slice(0, 2) + "•••@" + b : ""; };
+async function adminGoogleEmail() {
+  await syncLoadGis();
+  const token = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Λήξη χρόνου — ξαναδοκίμασε.")), 90000);
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: SYNC_CLIENT_ID,
+      scope: SYNC_SCOPE,
+      callback: (r) => { clearTimeout(timer); if (r && r.access_token) resolve(r.access_token); else reject(new Error("Η σύνδεση με Google δεν ολοκληρώθηκε.")); },
+      error_callback: () => { clearTimeout(timer); reject(new Error("Η σύνδεση με Google ακυρώθηκε ή μπλοκαρίστηκε (επίτρεψε τα αναδυόμενα παράθυρα).")); },
+    });
+    client.requestAccessToken({ prompt: "select_account" });
+  });
+  const au = (await (await syncGfetch(token, "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)")).json()).user;
+  return au && au.emailAddress ? String(au.emailAddress).toLowerCase() : "";
+}
 // Κλείδωμα μετά από λάθος προσπάθειες
 const ADMIN_LOCK_KEY = "brewtopia-admin-lock";
 function adminLockRead() { try { return JSON.parse(window.localStorage.getItem(ADMIN_LOCK_KEY) || "null") || { n: 0, until: 0 }; } catch (e) { return { n: 0, until: 0 }; } }
@@ -3634,7 +3662,23 @@ function AdminCodePanel({ code, setCode, recovery, setRecovery }) {
   const [recMode, setRecMode] = useState(false);
   const [recCurrent, setRecCurrent] = useState("");
   const [recShown, setRecShown] = useState("");
+  const [mailMode, setMailMode] = useState(false);
+  const [mailCurrent, setMailCurrent] = useState("");
+  const [mailMsg, setMailMsg] = useState("");
+  const [ownerMail, setOwnerMail] = useState(() => adminOwnerEmail());
   const unset = adminIsUnset(code);
+
+  const setOwner = async () => {
+    if (busy) return;
+    setBusy(true); setMailMsg("");
+    try {
+      if (!(await adminCheck(mailCurrent, code))) { setMailMsg("Ο τρέχων κωδικός δεν είναι σωστός."); return; }
+      const em = await adminGoogleEmail();
+      if (!em) { setMailMsg("Δεν διαβάστηκε το e-mail του λογαριασμού."); return; }
+      try { window.localStorage.setItem(ADMIN_OWNER_KEY, JSON.stringify(em)); } catch (e) {}
+      setOwnerMail(em); setMailMode(false); setMailCurrent("");
+    } catch (e) { setMailMsg((e && e.message) || "Δεν ήταν δυνατή η σύνδεση."); } finally { setBusy(false); }
+  };
 
   const startEdit = () => { setCurrent(""); setDraft(""); setConfirmDraft(""); setError(""); setEditing(true); };
 
@@ -3690,7 +3734,28 @@ function AdminCodePanel({ code, setCode, recovery, setRecovery }) {
       )}
 
       <div className="mt-3 pt-3 border-t border-slate-200">
-        <p className="text-xs font-semibold text-slate-700 mb-1">Κλειδί ανάκτησης (αν ξεχάσεις τον κωδικό)</p>
+        <p className="text-xs font-semibold text-slate-700 mb-1">E-mail ανάκτησης (αν ξεχάσεις τον κωδικό)</p>
+        <p className="text-[11px] text-slate-500 mb-2">
+          {ownerMail ? <>Ισχύει ο λογαριασμός <b className="text-slate-800">{ownerMail}</b>. </> : "Δεν έχει οριστεί ακόμα. "}
+          Δεν στέλνεται μήνυμα: όταν ξεχάσεις τον κωδικό πατάς «Επαναφορά με Google» και συνδέεσαι με αυτόν τον λογαριασμό για να βάλεις νέο.
+        </p>
+        {!mailMode ? (
+          <button onClick={() => { setMailMode(true); setMailMsg(""); }} className="text-[11px] text-teal-700 underline">{ownerMail ? "Αλλαγή λογαριασμού ανάκτησης" : "Ορισμός λογαριασμού ανάκτησης"}</button>
+        ) : (
+          <div className="space-y-2">
+            <input type="password" placeholder="Τρέχων κωδικός διαχειριστή" autoComplete="off" className={inputCls + " max-w-[220px]"}
+              value={mailCurrent} onChange={(e) => { setMailCurrent(e.target.value); setMailMsg(""); }} />
+            {mailMsg && <p className="text-xs text-red-600">{mailMsg}</p>}
+            <div className="flex items-center gap-2">
+              <button disabled={busy} onClick={setOwner} className="bg-teal-700 text-white px-3 py-2 rounded-lg text-xs font-semibold disabled:opacity-50">Σύνδεση με Google και ορισμός</button>
+              <button onClick={() => { setMailMode(false); setMailMsg(""); }} className="border border-slate-300 px-3 py-2 rounded-lg text-xs">Άκυρο</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 pt-3 border-t border-slate-200">
+        <p className="text-xs font-semibold text-slate-700 mb-1">Κλειδί ανάκτησης (δεύτερη δυνατότητα, χωρίς internet)</p>
         <p className="text-[11px] text-slate-500 mb-2">
           {recovery ? "Έχει δημιουργηθεί κλειδί ανάκτησης σε αυτή τη συσκευή. " : "Δεν έχει δημιουργηθεί ακόμα. "}
           Γράψε το σε ασφαλές μέρος (π.χ. διαχειριστής κωδικών) — εμφανίζεται μόνο μία φορά και ισχύει μόνο για αυτή τη συσκευή.
@@ -3728,6 +3793,16 @@ function AdminGate({ code, setCode, recovery, unlocked, setUnlocked, children })
   const [forgot, setForgot] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [recIn, setRecIn] = useState("");
+  const ownerEmail = adminOwnerEmail();
+  const googleRecover = async () => {
+    if (busy || waitSec > 0) return;
+    setBusy(true); setError("");
+    try {
+      const em = await adminGoogleEmail();
+      if (em && ownerEmail && em === ownerEmail) { adminLockWrite({ n: 0, until: 0 }); setResetting(true); }
+      else { const n = adminLockFail(); setError(n >= 5 ? "Πολλές λάθος προσπάθειες — περίμενε." : "Αυτός ο λογαριασμός Google δεν είναι ο λογαριασμός ανάκτησης."); }
+    } catch (e) { setError((e && e.message) || "Δεν ήταν δυνατή η σύνδεση με Google."); } finally { setBusy(false); }
+  };
   const [n1, setN1] = useState("");
   const [n2, setN2] = useState("");
   const [now, setNow] = useState(Date.now());
@@ -3797,6 +3872,14 @@ function AdminGate({ code, setCode, recovery, unlocked, setUnlocked, children })
     return (
       <Card>
         <p className="text-sm font-bold text-slate-800 mb-1 flex items-center gap-1.5"><ShieldCheck size={16} /> Ξέχασα τον κωδικό</p>
+        {ownerEmail && (
+          <div className="mb-3 rounded-lg border border-teal-200 bg-teal-50 p-2">
+            <p className="text-xs text-slate-700 mb-2">Επαναφορά με τον λογαριασμό Google <b>{adminMaskEmail(ownerEmail)}</b> (θα ανοίξει παράθυρο σύνδεσης).</p>
+            <button disabled={busy || waitSec > 0} onClick={googleRecover} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-50">
+              {busy ? "Περίμενε…" : "Επαναφορά με Google"}
+            </button>
+          </div>
+        )}
         {recovery ? (
           <>
             <p className="text-xs text-slate-500 mb-3">Γράψε το κλειδί ανάκτησης που είχες σημειώσει (π.χ. K7M2-9XQD-4TPA-R6WH).</p>
@@ -3809,7 +3892,7 @@ function AdminGate({ code, setCode, recovery, unlocked, setUnlocked, children })
         ) : (
           <p className="text-xs text-slate-600 mb-1">
             Σε αυτή τη συσκευή δεν έχει δημιουργηθεί κλειδί ανάκτησης. Δοκίμασε τον απλό κωδικό <b>1234</b> ή τον κωδικό που είχες βάλει.
-            Αν είσαι ήδη μέσα σε άλλη συσκευή σου, πήγαινε Αρχείο → Κωδικός Διαχειριστή και δημιούργησε κλειδί ανάκτησης για να το έχεις την επόμενη φορά.
+            Αν είσαι ήδη μέσα σε άλλη συσκευή σου, πήγαινε Ρυθμίσεις → Ασφάλεια και δημιούργησε κλειδί ανάκτησης για να το έχεις την επόμενη φορά.
           </p>
         )}
         {waitSec > 0 && <p className="text-xs text-red-600 mt-2">Κλειδώθηκε για {waitSec} δευτερόλεπτα.</p>}
@@ -4376,19 +4459,7 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
         Αρχειοθέτηση & Καταστροφή Εντύπων
       </SectionTitle>
 
-      <BusinessInfoPanel info={businessInfo} setInfo={setBusinessInfo} />
-
-      <ThermoServerPanel config={thermoConfig} setConfig={setThermoConfig} />
-
-      <AdminCodePanel code={adminCode} setCode={setAdminCode} recovery={adminRecovery} setRecovery={setAdminRecovery} />
-
-      {sync && <SyncPanel sync={sync} />}
-
-      <BackupPanel getBackupText={getBackupText} onImport={onImport} />
-
       <TechnicianVisitsPanel visits={technicianVisits} setVisits={setTechnicianVisits} />
-
-      <SafetyTechnicianPanel info={safetyTechnician} setInfo={setSafetyTechnician} />
 
       <MonthlyRetentionPanel
         ccpData={ccpData} setCcpData={setCcpData}
@@ -4450,6 +4521,57 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
           </Card>
         ))}
       </div>
+    </div>
+  );
+}
+
+/* ============================================================
+   ΡΥΘΜΙΣΕΙΣ (χωριστή καρτέλα: επιχείρηση, συσκευές/συγχρονισμός, αισθητήρες, ασφάλεια)
+   ============================================================ */
+function SettingsGroup({ icon: Icon, title, hint, defaultOpen, children }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <div className="mb-3 rounded-xl border border-slate-200 bg-white overflow-hidden shadow-sm">
+      <button onClick={() => setOpen((o) => !o)} className="w-full flex items-center gap-2 px-3 py-3 text-left">
+        <Icon size={18} className="text-teal-700 shrink-0" />
+        <span className="flex-1 min-w-0">
+          <span className="block text-sm font-bold text-slate-800">{title}</span>
+          {hint && <span className="block text-[11px] text-slate-500">{hint}</span>}
+        </span>
+        <span className={`text-slate-400 transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+      </button>
+      {open && <div className="px-2 pb-2 pt-1 border-t border-slate-100">{children}</div>}
+    </div>
+  );
+}
+
+function SettingsTab({ getBackupText, onImport, businessInfo, setBusinessInfo, adminCode, setAdminCode, adminRecovery, setAdminRecovery, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig, sync }) {
+  return (
+    <div>
+      <SectionTitle icon={Cog} sub="Όλες οι ρυθμίσεις σε ένα μέρος. Πάτα μια ομάδα για να ανοίξει.">
+        Ρυθμίσεις
+      </SectionTitle>
+
+      <SettingsGroup icon={Sparkles} title="Επιχείρηση" hint="Επωνυμία, χρώμα, στοιχεία επιχείρησης και τεχνικού ασφαλείας">
+        <BusinessInfoPanel info={businessInfo} setInfo={setBusinessInfo} />
+        <SafetyTechnicianPanel info={safetyTechnician} setInfo={setSafetyTechnician} />
+      </SettingsGroup>
+
+      <SettingsGroup icon={Droplet} title="Αισθητήρες θερμοκρασίας (ThermoServer)" hint="Σύνδεση, κλειδί και αυτόματη καταγραφή σε ώρες βάρδιας">
+        <ThermoServerPanel config={thermoConfig} setConfig={setThermoConfig} />
+      </SettingsGroup>
+
+      <SettingsGroup icon={Users} title="Συσκευές και συγχρονισμός" hint="Google Drive, κρυπτογράφηση, «Συσκευή προσωπικού»">
+        {sync && <SyncPanel sync={sync} />}
+      </SettingsGroup>
+
+      <SettingsGroup icon={Archive} title="Αντίγραφα ασφαλείας" hint="Αποθήκευση και επαναφορά όλων των δεδομένων">
+        <BackupPanel getBackupText={getBackupText} onImport={onImport} />
+      </SettingsGroup>
+
+      <SettingsGroup icon={ShieldCheck} title="Ασφάλεια και κωδικός διαχειριστή" hint="Αλλαγή κωδικού, e-mail ανάκτησης, κλειδί ανάκτησης">
+        <AdminCodePanel code={adminCode} setCode={setAdminCode} recovery={adminRecovery} setRecovery={setAdminRecovery} />
+      </SettingsGroup>
     </div>
   );
 }
@@ -5298,6 +5420,7 @@ function App() {
     { id: "reports", label: "Αναφορές", icon: BarChart3 },
     { id: "haccp", label: "HACCP", icon: GitBranch },
     { id: "archive", label: "Αρχείο", icon: Archive },
+    { id: "settings", label: "Ρυθμίσεις", icon: Cog },
   ].filter((t) => !(staffDevice && adminOnlyTabs.includes(t.id)));
 
   return (
@@ -5376,6 +5499,16 @@ function App() {
           />
         )}
         {tab === "haccp" && <HaccpFlowTab businessInfo={businessInfo} />}
+        {tab === "settings" && (
+          <SettingsTab
+            getBackupText={getBackupText} onImport={importBackup}
+            businessInfo={businessInfo} setBusinessInfo={setBusinessInfo}
+            adminCode={adminCode} setAdminCode={setAdminCode} adminRecovery={adminRecovery} setAdminRecovery={setAdminRecovery}
+            safetyTechnician={safetyTechnician} setSafetyTechnician={setSafetyTechnician}
+            thermoConfig={thermoConfig} setThermoConfig={setThermoConfig}
+            sync={sync}
+          />
+        )}
         {tab === "archive" && (
           <ArchiveTab
             records={records} setRecords={setRecords}
