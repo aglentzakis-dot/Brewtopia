@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.8"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.9"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1781,6 +1781,22 @@ const cashCents = (x) => Math.round(x * 100);
 const CASH_SLOT_ORDER = ["Γ", "Α", "Β"];
 const cashAddDays = (iso, n) => { const [y, m, d] = String(iso).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
 const cashHasVal = (v) => v !== undefined && v !== null && v !== "" && v !== "∅";
+// Ανοιχτό πρόβλημα καθαριότητας: η πιο πρόσφατη σήμανση (από αυτή τη βάρδια προς τα πίσω, έως 90 μέρες) είναι «Χ».
+// Λύνεται όταν σε μεταγενέστερη βάρδια μπει ✓ ή *. Επιστρέφει { date, shift, own } ή null.
+function cleanOpenProblem(cleanData, key, date, shift) {
+  const idx = CASH_SLOT_ORDER.indexOf(shift);
+  if (idx < 0) return null;
+  for (let step = 0; step < 270; step++) {
+    const j = idx - step;
+    const dOff = Math.floor(j / 3);
+    const sh = CASH_SLOT_ORDER[((j % 3) + 3) % 3];
+    const d = cashAddDays(date, dOff);
+    const mark = cleanData?.[d.slice(0, 7)]?.[d]?.[sh]?.[key];
+    if (mark === "Χ" || mark === "X") return { date: d, shift: sh, own: step === 0 };
+    if (mark === "✓" || mark === "*") return null;
+  }
+  return null;
+}
 // Επιστρέφει { cents, date, shift } της πλησιέστερης προηγούμενης καταχωρημένης τιμής (έως 3 βάρδιες πίσω), ή null
 function cashPrevValue(cashData, date, shift, key) {
   const idx = CASH_SLOT_ORDER.indexOf(shift);
@@ -2258,11 +2274,17 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
   const thermoFetch = (path) => thermoRequest(thermoUrl(), path);
 
-  // Χαμηλότερη/υψηλότερη θερμοκρασία των τελευταίων 24 ωρών ανά σταθμό (από το ιστορικό του ThermoServer)
-  const [thermoStats, setThermoStats] = useState({}); // { stationId: { min, max, n } | null }
+  // Χαμηλότερη/υψηλότερη θερμοκρασία της ΕΠΙΛΕΓΜΕΝΗΣ ημερομηνίας (τοπική ημέρα) ανά σταθμό, από το ιστορικό του ThermoServer.
+  // Αν δεν υπάρχουν μετρήσεις εκείνης της ημέρας, δεν εμφανίζεται τίποτα.
+  const [thermoStats, setThermoStats] = useState({}); // { "σταθμός|ημερομηνία": { min, max, n } | null }
   const statSensorsKey = (stations || []).map((st) => (st.type !== "dry" && st.sensorId ? st.id + ":" + st.sensorId : "")).join("|");
   useEffect(() => {
     if (sub !== "temps" || !thermoConfig?.enabled || !thermoConfig?.baseUrl) return;
+    const parts = String(date).split("-").map(Number);
+    if (parts.length !== 3 || parts.some((x) => !Number.isFinite(x))) return;
+    const dayStart = new Date(parts[0], parts[1] - 1, parts[2]).getTime();
+    const dayEnd = dayStart + 24 * 3600 * 1000;
+    const daysBack = Math.min(120, Math.max(1, Math.ceil((Date.now() - dayStart) / 86400000) + 1));
     let cancelled = false;
     const run = async () => {
       const out = {};
@@ -2270,12 +2292,13 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         if (cancelled) return;
         if (st.type === "dry" || !st.sensorId) continue;
         try {
-          const res = await thermoRequest(thermoUrl(), `/api/history?device=${encodeURIComponent(st.sensorId)}&days=1`);
+          const res = await thermoRequest(thermoUrl(), `/api/history?device=${encodeURIComponent(st.sensorId)}&days=${daysBack}`);
           if (!res.ok) continue;
           const rows = await res.json();
-          const cutoff = Date.now() - 24 * 3600 * 1000;
-          const temps = (Array.isArray(rows) ? rows : []).filter((r) => typeof r.temperature === "number" && (typeof r.ts !== "number" || r.ts >= cutoff)).map((r) => r.temperature);
-          out[st.id] = temps.length ? { min: Math.min(...temps), max: Math.max(...temps), n: temps.length } : null;
+          const temps = (Array.isArray(rows) ? rows : [])
+            .filter((r) => r && typeof r.temperature === "number" && Number.isFinite(r.temperature) && typeof r.ts === "number" && r.ts >= dayStart && r.ts < dayEnd)
+            .map((r) => r.temperature);
+          out[st.id + "|" + date] = temps.length ? { min: Math.min(...temps), max: Math.max(...temps), n: temps.length } : null;
         } catch (e) {
           if (e && e.noKey) return; // χωρίς κλειδί δεν δείχνουμε τίποτα
         }
@@ -2286,7 +2309,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     const iv = setInterval(run, 10 * 60000);
     return () => { cancelled = true; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sub, thermoConfig?.enabled, thermoConfig?.baseUrl, statSensorsKey]);
+  }, [sub, date, thermoConfig?.enabled, thermoConfig?.baseUrl, statSensorsKey]);
 
   const fetchThermoDevices = async () => {
     if (!thermoConfig?.baseUrl) return;
@@ -2616,13 +2639,13 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
           )}
 
           {!editingStations && (
-            <div className="space-y-2">
+            <div className="space-y-0.5">
               {stations.map((st) => {
                 const val = dayTemps[st.id] ?? "";
                 const ok = evalStation(st, val);
                 const outOfRange = val !== "" && val !== "-" && ok === false;
                 return (
-                  <div key={st.id} className="border-b border-slate-100 pb-2">
+                  <div key={st.id} className="border-b border-slate-100 pb-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm text-slate-700 flex items-center gap-1.5">
                         {st.type !== "dry" && <Snowflake size={13} className={st.type === "freezer" ? "text-sky-500" : "text-teal-500"} />}
@@ -2643,13 +2666,14 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                         )}
                       </div>
                     </div>
-                    {thermoStats[st.id] && (() => {
-                      const ts2 = thermoStats[st.id];
+                    {thermoStats[st.id + "|" + date] && (() => {
+                      const ts2 = thermoStats[st.id + "|" + date];
+                      if (!ts2 || !Number.isFinite(ts2.min) || !Number.isFinite(ts2.max)) return null;
                       const f = (n) => n.toFixed(1).replace(".", ",");
                       const maxBad = evalStation(st, String(ts2.max)) === false;
                       return (
-                        <p className="text-[10px] text-slate-400 mt-0.5" title="Από το ιστορικό του ThermoServer, τελευταίες 24 ώρες">
-                          24ω: ελάχ. <b className="text-slate-600">{f(ts2.min)}°</b> · μέγ. <b className={maxBad ? "text-red-600" : "text-slate-600"}>{f(ts2.max)}°{maxBad ? " ⚠" : ""}</b>
+                        <p className="text-[10px] leading-tight text-slate-400" title="Από το ιστορικό του ThermoServer, για την επιλεγμένη ημερομηνία">
+                          ημέρα: ελάχ. <b className="text-slate-600">{f(ts2.min)}°</b> · μέγ. <b className={maxBad ? "text-red-600" : "text-slate-600"}>{f(ts2.max)}°{maxBad ? " ⚠" : ""}</b>
                         </p>
                       );
                     })()}
@@ -2873,7 +2897,8 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                     const key = `${group.id}__${item.id}`;
                     const val = dayClean[key] || "";
                     const scheduled = item.days && item.days.length > 0;
-                    const otherShiftDone = scheduled && !val
+                    const openProb = cleanOpenProblem(cleanData, key, date, shift);
+                    const otherShiftDone = scheduled && !val && !openProb
                       ? SHIFTS.find((s) => s !== shift && todayShifts?.[s]?.[key])
                       : null;
                     const expanded = expandedClean[key];
@@ -2891,10 +2916,15 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                     }
 
                     return (
-                      <div key={key} className="flex items-center justify-between text-sm gap-2">
+                      <div key={key} className={`flex items-center justify-between text-sm gap-2 ${openProb ? "bg-red-600 text-white rounded-lg px-2 py-1.5 ring-2 ring-red-300" : ""}`}>
                         <div>
-                          <p className="text-slate-700">{item.name}</p>
-                          <p className="text-[10px] text-slate-400">{item.freq}</p>
+                          <p className={openProb ? "font-bold text-white" : "text-slate-700"}>{openProb ? "🔴 " : ""}{item.name}</p>
+                          <p className={`text-[10px] ${openProb ? "text-red-100" : "text-slate-400"}`}>{item.freq}</p>
+                          {openProb && (
+                            <p className="text-[11px] font-semibold text-white">
+                              {openProb.own ? "Εντοπίστηκε πρόβλημα — χρειάζεται καθαριότητα" : `Πρόβλημα από ${shiftNames[openProb.shift] || openProb.shift} (${openProb.date.split("-").reverse().join("/")}) — να γίνει καθαριότητα (*) ή έλεγχος (✓)`}
+                            </p>
+                          )}
                         </div>
                         <div className="flex gap-1">
                           {[["✓", "teal"], ["Χ", "red"], ["*", "amber"]].map(([mark, color]) => (
@@ -5671,6 +5701,24 @@ function App() {
 const UNLOCK_CODE = "6969";
 const UNLOCK_KEY = STORAGE_PREFIX + "unlocked";
 
+class AppErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err, info) { try { console.error("Brewtopia σφάλμα:", err, info); } catch (e) {} }
+  render() {
+    if (!this.state.err) return this.props.children;
+    const msg = String((this.state.err && (this.state.err.stack || this.state.err.message)) || this.state.err).slice(0, 900);
+    return (
+      <div style={{ padding: 20, fontFamily: "sans-serif", fontSize: 14, color: "#7f1d1d" }}>
+        <p style={{ fontWeight: 700, fontSize: 16 }}>Παρουσιάστηκε σφάλμα στην εφαρμογή</p>
+        <p>Τα δεδομένα σου δεν έχουν χαθεί. Πάτα «Επαναφόρτωση». Αν ξανασυμβεί, στείλε μου το παρακάτω κείμενο.</p>
+        <button onClick={() => location.reload()} style={{ margin: "8px 0", padding: "8px 14px", background: "#0f766e", color: "#fff", border: 0, borderRadius: 8, fontWeight: 700 }}>Επαναφόρτωση</button>
+        <pre style={{ whiteSpace: "pre-wrap", fontSize: 11, background: "#fee2e2", padding: 8, borderRadius: 8 }}>{msg}</pre>
+      </div>
+    );
+  }
+}
+
 function PasswordGate({ children }) {
   const [unlocked, setUnlocked] = useState(() => {
     try { return window.localStorage.getItem(UNLOCK_KEY) === "yes"; } catch (e) { return false; }
@@ -5717,9 +5765,11 @@ function PasswordGate({ children }) {
 try {
   const root = ReactDOM.createRoot(document.getElementById("root"));
   root.render(
-    <PasswordGate>
-      <App />
-    </PasswordGate>
+    <AppErrorBoundary>
+      <PasswordGate>
+        <App />
+      </PasswordGate>
+    </AppErrorBoundary>
   );
 } catch (e) {
   document.getElementById("root").innerHTML =
