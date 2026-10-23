@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.11"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.13"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -452,6 +452,17 @@ function cleanFreqLabel(item) {
     i = j + 1;
   }
   return parts.join(" · ");
+}
+// Βρίσκει ονόματα ημερών μέσα σε ελεύθερο κείμενο συχνότητας (π.χ. «κάθε Σάββατο», «Τετ-Σαβ»)
+function parseFreqDays(text) {
+  const t = String(text || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/ς/g, "σ");
+  const map = [[1, ["δευτερ", "δευ"]], [2, ["τριτ", "τρι"]], [3, ["τεταρτ", "τετ"]], [4, ["πεμπτ", "πεμ"]], [5, ["παρασκευ", "παρ"]], [6, ["σαββατ", "σαβ"]], [0, ["κυριακ", "κυρ"]]];
+  const toks = t.split(/[^α-ω]+/).filter(Boolean);
+  const found = [];
+  map.forEach(([idx, stems]) => {
+    if (toks.some((tk) => stems.some((st) => (st.length <= 3 ? tk === st : tk.startsWith(st))))) found.push(idx);
+  });
+  return found;
 }
 // Τρόπος συχνότητας: "daily" | "days" | "custom"
 function cleanFreqMode(item) {
@@ -1702,14 +1713,36 @@ function MonthlyFullPrintSheet({ mk, stations, displayItems, cleaningAreas, ccpD
 function NewCleanItemForm({ onAdd }) {
   const [name, setName] = useState("");
   const [freq, setFreq] = useState("");
+  const [mode, setMode] = useState("daily");
+  const [days, setDays] = useState([]);
+  const toggle = (d) => setDays((cur) => (cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d]));
+  const add = () => {
+    if (!name.trim()) return;
+    if (mode === "days" && days.length === 0) return;
+    onAdd(name, freq, { mode, days });
+    setName(""); setFreq(""); setMode("daily"); setDays([]);
+  };
   return (
-    <div className="flex gap-1.5 pt-1">
-      <input placeholder="Νέο σημείο…" value={name} onChange={(e) => setName(e.target.value)} className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-xs" />
-      <input placeholder="Συχνότητα" value={freq} onChange={(e) => setFreq(e.target.value)} className="w-24 border border-slate-300 rounded-lg px-2 py-1 text-xs" />
-      <button
-        onClick={() => { onAdd(name, freq); setName(""); setFreq(""); }}
-        className="w-7 h-7 shrink-0 rounded-lg bg-teal-700 text-white flex items-center justify-center"
-      ><Plus size={14} /></button>
+    <div className="pt-1 space-y-1">
+      <div className="flex gap-1.5">
+        <input placeholder="Νέο σημείο…" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") add(); }} className="flex-1 border border-slate-300 rounded-lg px-2 py-1 text-xs" />
+        <button onClick={add} className="w-7 h-7 shrink-0 rounded-lg bg-teal-700 text-white flex items-center justify-center"><Plus size={14} /></button>
+      </div>
+      <div className="flex flex-wrap items-center gap-1">
+        <select value={mode} onChange={(e) => setMode(e.target.value)} className="text-[11px] border border-slate-300 rounded-lg px-1.5 py-1 bg-white text-slate-600">
+          <option value="daily">Κάθε μέρα</option>
+          <option value="days">Συγκεκριμένες μέρες…</option>
+          <option value="custom">Άλλο (γράφω εγώ)</option>
+        </select>
+        {mode === "days" && WEEKDAYS.map((wd) => (
+          <button key={wd.idx} onClick={() => toggle(wd.idx)}
+            className={`text-[9px] w-6 h-6 rounded-full border font-semibold ${days.includes(wd.idx) ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-400"}`}>{wd.label}</button>
+        ))}
+        {mode === "custom" && (
+          <input placeholder="π.χ. μηνιαία" value={freq} onChange={(e) => setFreq(e.target.value)} className="w-28 text-[11px] border border-slate-300 rounded-lg px-1.5 py-1" />
+        )}
+        {mode === "days" && <span className="text-[10px] text-teal-700 font-semibold ml-1">{days.length ? cleanFreqLabel({ days }) : "διάλεξε μέρες"}</span>}
+      </div>
     </div>
   );
 }
@@ -1728,6 +1761,35 @@ function daysSinceLastCleanMark(key, cleanData) {
   return Math.floor((isoToDate(todayISO()) - isoToDate(lastISO)) / 86400000);
 }
 
+// Κατάσταση κάθε ημέρας του μήνα για ένα σημείο: done (✓/*), open (εκκρεμεί Χ μέχρι να γίνει καθαριότητα), x (μπήκε Χ εκείνη τη μέρα)
+function cleanGridCells(cleanData, key, month, daysInMonth) {
+  const cells = {};
+  // κατάσταση από πριν τον μήνα: η πιο πρόσφατη σήμανση
+  let open = false;
+  const firstDay = `${month}-01`;
+  for (let step = 1; step <= 270; step++) {
+    const j = -step;
+    const d = cashAddDays(firstDay, Math.floor(j / 3));
+    const sh = CASH_SLOT_ORDER[((j % 3) + 3) % 3];
+    const mark = cleanData?.[d.slice(0, 7)]?.[d]?.[sh]?.[key];
+    if (mark === "Χ" || mark === "X") { open = true; break; }
+    if (mark === "✓" || mark === "*") break;
+  }
+  const today = todayISO();
+  for (let d = 1; d <= daysInMonth; d++) {
+    const iso = `${month}-${String(d).padStart(2, "0")}`;
+    if (iso > today) break;
+    let done = false, x = false;
+    for (const sh of CASH_SLOT_ORDER) {
+      const mark = cleanData?.[month]?.[iso]?.[sh]?.[key];
+      if (mark === "Χ" || mark === "X") { open = true; x = true; }
+      else if (mark === "✓" || mark === "*") { open = false; done = true; }
+    }
+    cells[d] = { done, open, x };
+  }
+  return cells;
+}
+
 function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
@@ -1735,7 +1797,7 @@ function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
 
   const rows = [];
   cleaningAreas.forEach((group) => {
-    group.items.forEach((item) => rows.push({ key: `${group.id}__${item.id}`, name: item.name, area: group.area, days: item.days || [] }));
+    group.items.forEach((item) => rows.push({ key: `${group.id}__${item.id}`, name: item.name, area: group.area, days: item.days || [], cells: cleanGridCells(cleanData, `${group.id}__${item.id}`, month, daysInMonth) }));
   });
 
   return (
@@ -1758,10 +1820,12 @@ function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
                 </td>
                 {dayCols.map((d) => {
                   const dateISO = `${month}-${String(d).padStart(2, "0")}`;
-                  const done = SHIFTS.some((s) => cleanData?.[month]?.[dateISO]?.[s]?.[r.key]);
+                  const st = r.cells[d];
+                  const done = st ? st.done : SHIFTS.some((s) => cleanData?.[month]?.[dateISO]?.[s]?.[r.key]);
+                  const openDay = !!(st && st.open);
                   const sched = r.days.length > 0 && r.days.includes(new Date(y, m - 1, d).getDay());
                   return (
-                    <td key={d} className={`w-6 h-6 text-center ${sched ? "border-2 border-teal-300" : "border border-slate-200"} ${done ? "bg-teal-500" : ""}`}></td>
+                    <td key={d} className={`w-6 h-6 text-center ${sched ? "border-2 border-teal-300" : "border border-slate-200"} ${openDay ? "bg-red-200 text-red-700 font-bold" : done ? "bg-teal-500" : ""}`}>{openDay && st.x ? "Χ" : ""}</td>
                   );
                 })}
               </tr>
@@ -1772,7 +1836,7 @@ function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
           )}
         </tbody>
       </table>
-      <p className="text-[10px] text-slate-400 mt-2">Πράσινο = έγινε καθαριότητα εκείνη τη μέρα. Αχνό πλαίσιο = μέρα που είναι προγραμματισμένη. Κόκκινο όνομα = πάνω από 25 μέρες χωρίς καμία καταχώρηση.</p>
+      <p className="text-[10px] text-slate-400 mt-2">Πράσινο = έγινε καθαριότητα εκείνη τη μέρα. Αχνό πλαίσιο = μέρα που είναι προγραμματισμένη. Αχνό κόκκινο (Χ) = εντοπίστηκε πρόβλημα και δεν έχει γίνει ακόμα καθαριότητα. Κόκκινο όνομα = πάνω από 25 μέρες χωρίς καμία καταχώρηση.</p>
     </Card>
   );
 }
@@ -2231,6 +2295,51 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   const addDisplayItem = () => setDisplayItems([...displayItems, { id: uid(), name: "Νέα βιτρίνα", limit: 7, cmp: "lt" }]);
 
   const [editingClean, setEditingClean] = useState(false);
+  const cleanSnapRef = useRef(null);
+  // Σημεία που η συχνότητα γράφτηκε ως κείμενο με ημέρα (π.χ. «κάθε Σάββατο») μετατρέπονται σε πραγματικές μέρες
+  useEffect(() => {
+    if (!Array.isArray(cleaningAreas)) return;
+    let changed = false;
+    const next = cleaningAreas.map((g) => ({
+      ...g,
+      items: (g.items || []).map((it) => {
+        if ((it.days || []).length > 0 || it.mode === "daily" || !it.freq) return it;
+        const dd = parseFreqDays(it.freq);
+        if (dd.length === 0) return it;
+        changed = true;
+        return { ...it, mode: "days", days: dd, freq: cleanFreqLabel({ days: dd, freq: "" }) };
+      }),
+    }));
+    if (changed) setCleaningAreas(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleaningAreas]);
+  const [leavePrompt, setLeavePrompt] = useState(null); // { proceed } όταν ο χρήστης φεύγει μέσα από επεξεργασία λίστας
+  const startEditClean = () => { cleanSnapRef.current = cleaningAreas; setEditingClean(true); };
+  const cleanEditDirty = () => editingClean && cleanSnapRef.current != null && JSON.stringify(cleanSnapRef.current) !== JSON.stringify(cleaningAreas);
+  const finishEditClean = (save) => {
+    if (!save && cleanSnapRef.current) setCleaningAreas(cleanSnapRef.current);
+    cleanSnapRef.current = null;
+    setEditingClean(false);
+  };
+  // Επιστρέφει true αν σταμάτησε την αλλαγή σελίδας για να ρωτήσει· αλλιώς false (συνεχίζει κανονικά)
+  const guardCleanLeave = (proceed) => {
+    if (!editingClean) return false;
+    if (!cleanEditDirty()) { finishEditClean(true); return false; }
+    setLeavePrompt({ proceed });
+    return true;
+  };
+  const guardRef = useRef(null);
+  guardRef.current = guardCleanLeave;
+  useEffect(() => {
+    window.__brewLeaveGuard = (proceed) => (guardRef.current ? guardRef.current(proceed) : false);
+    return () => { try { delete window.__brewLeaveGuard; } catch (e) { window.__brewLeaveGuard = undefined; } };
+  }, []);
+  useEffect(() => {
+    if (!editingClean) return;
+    const h = (e) => { if (cleanEditDirty()) { e.preventDefault(); e.returnValue = ""; } };
+    window.addEventListener("beforeunload", h);
+    return () => window.removeEventListener("beforeunload", h);
+  });
   const [showCleanGrid, setShowCleanGrid] = useState(false);
   const [expandedClean, setExpandedClean] = useState({});
   const moveCleanArea = (idx, dir) => {
@@ -2261,11 +2370,16 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     const next = cleaningAreas.map((g, i) => (i === gIdx ? { ...g, items: g.items.filter((_, ii) => ii !== iIdx) } : g));
     setCleaningAreas(next);
   };
-  const addCleanItem = (gIdx, name, freq) => {
-    if (!name.trim()) return;
-    const next = cleaningAreas.map((g, i) => (i === gIdx ? { ...g, items: [...g.items, { id: uid(), name, freq: freq || "—" }] } : g));
+  const addCleanItem = (gIdx, name, freq, extra) => {
+    const nm = (name || "").trim();
+    if (!nm) return;
+    const ex = extra || {};
+    const days = ex.mode === "days" ? (ex.days || []) : [];
+    const item = { id: uid(), name: nm, mode: ex.mode || "daily", days, freq: ex.mode === "days" ? cleanFreqLabel({ days, freq: "" }) : ex.mode === "custom" ? (freq || "—") : "Κάθε μέρα" };
+    const next = cleaningAreas.map((g, i) => (i === gIdx ? { ...g, items: [...g.items, item] } : g));
     setCleaningAreas(next);
   };
+
   const renameCleanItem = (gIdx, iIdx, field, val) => {
     const next = cleaningAreas.map((g, i) => {
       if (i !== gIdx) return g;
@@ -2636,7 +2750,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         {subTabs.map((t) => (
           <button
             key={t.id}
-            onClick={() => setSub(t.id)}
+            onClick={() => { const go = () => setSub(t.id); if (t.id !== sub && guardCleanLeave(go)) return; go(); }}
             className={`shrink-0 snap-start w-[calc(50%-0.25rem)] justify-center flex items-center gap-1.5 px-2 py-2 rounded-full text-[11px] font-semibold border whitespace-nowrap ${BTN3D} ${
               sub === t.id ? "bg-gradient-to-b from-slate-700 to-slate-900 text-white border-slate-900" : "border-slate-300 text-slate-600 bg-gradient-to-b from-white to-slate-100"
             }`}
@@ -2944,6 +3058,26 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
       {sub === "clean" && (
         <div className="space-y-3">
+          {editingClean && (
+            <div className="sticky top-[120px] z-10 bg-red-50 border-2 border-red-300 rounded-xl p-2 flex flex-wrap items-center gap-2 shadow-sm">
+              <span className="text-[11px] font-bold text-red-700 flex-1 min-w-[140px]">✎ Είσαι σε επεξεργασία λίστας καθαριότητας</span>
+              <button onClick={() => finishEditClean(false)} className="text-[11px] px-2.5 py-1.5 rounded-lg border border-red-300 text-red-700 bg-white font-semibold">Ακύρωση αλλαγών</button>
+              <button onClick={() => finishEditClean(true)} className="text-[11px] px-2.5 py-1.5 rounded-lg bg-red-600 text-white font-bold">Τέλος επεξεργασίας (αποθήκευση)</button>
+            </div>
+          )}
+          {leavePrompt && (
+            <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl p-4 max-w-sm w-full shadow-xl">
+                <p className="font-bold text-slate-800 mb-1">Έκανες αλλαγές στη λίστα καθαριότητας</p>
+                <p className="text-sm text-slate-600 mb-3">Θέλεις να αποθηκευτούν πριν φύγεις;</p>
+                <div className="flex flex-col gap-2">
+                  <button onClick={() => { const pr = leavePrompt.proceed; setLeavePrompt(null); finishEditClean(true); pr(); }} className="py-2 rounded-lg bg-teal-700 text-white text-sm font-semibold">Αποθήκευση και συνέχεια</button>
+                  <button onClick={() => { const pr = leavePrompt.proceed; setLeavePrompt(null); finishEditClean(false); pr(); }} className="py-2 rounded-lg border border-red-300 text-red-700 text-sm font-semibold">Να μην αποθηκευτούν</button>
+                  <button onClick={() => setLeavePrompt(null)} className="py-2 rounded-lg border border-slate-300 text-slate-600 text-sm">Μένω στην επεξεργασία</button>
+                </div>
+              </div>
+            </div>
+          )}
           {!editingClean && cleaningAreas.some((g) => g.items.some((it) => (it.days || []).length > 0)) && (
             <button onClick={toggleHideNotDue} className="text-[11px] text-slate-500 border border-slate-300 rounded-lg px-2 py-1 bg-white">
               {hideNotDue ? "👁 Εμφάνιση και των εργασιών που δεν είναι για σήμερα" : "🙈 Απόκρυψη εργασιών που δεν είναι για σήμερα (αχνές)"}
@@ -3172,7 +3306,8 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
             </button>
             {showCleanGrid && <MonthlyCleaningGrid cleaningAreas={cleaningAreas} cleanData={cleanData} month={exportMonth} />}
 
-            <button onClick={() => setEditingClean((v) => !v)} className="text-[11px] text-slate-400 underline">
+            <button onClick={() => (editingClean ? finishEditClean(true) : startEditClean())}
+              className={editingClean ? "text-[11px] px-2.5 py-1.5 rounded-lg bg-red-600 text-white font-bold" : "text-[11px] text-slate-400 underline"}>
               {editingClean ? "Τέλος επεξεργασίας λίστας καθαριότητας" : "Επεξεργασία λίστας καθαριότητας"}
             </button>
           </>
@@ -5701,7 +5836,7 @@ function App() {
           {tabs.map((t) => (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => { const g = window.__brewLeaveGuard; if (t.id !== tab && tab === "daily" && g && g(() => setTab(t.id))) return; setTab(t.id); }}
               className={`flex flex-col items-center gap-1 px-4 py-2.5 text-[11px] font-semibold whitespace-nowrap border-b-2 transition-colors
                 ${tab === t.id ? "border-teal-700 text-teal-800" : "border-transparent text-slate-400"}`}
             >
