@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.7"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.8"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -2258,6 +2258,36 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
   const thermoFetch = (path) => thermoRequest(thermoUrl(), path);
 
+  // Χαμηλότερη/υψηλότερη θερμοκρασία των τελευταίων 24 ωρών ανά σταθμό (από το ιστορικό του ThermoServer)
+  const [thermoStats, setThermoStats] = useState({}); // { stationId: { min, max, n } | null }
+  const statSensorsKey = (stations || []).map((st) => (st.type !== "dry" && st.sensorId ? st.id + ":" + st.sensorId : "")).join("|");
+  useEffect(() => {
+    if (sub !== "temps" || !thermoConfig?.enabled || !thermoConfig?.baseUrl) return;
+    let cancelled = false;
+    const run = async () => {
+      const out = {};
+      for (const st of stations || []) {
+        if (cancelled) return;
+        if (st.type === "dry" || !st.sensorId) continue;
+        try {
+          const res = await thermoRequest(thermoUrl(), `/api/history?device=${encodeURIComponent(st.sensorId)}&days=1`);
+          if (!res.ok) continue;
+          const rows = await res.json();
+          const cutoff = Date.now() - 24 * 3600 * 1000;
+          const temps = (Array.isArray(rows) ? rows : []).filter((r) => typeof r.temperature === "number" && (typeof r.ts !== "number" || r.ts >= cutoff)).map((r) => r.temperature);
+          out[st.id] = temps.length ? { min: Math.min(...temps), max: Math.max(...temps), n: temps.length } : null;
+        } catch (e) {
+          if (e && e.noKey) return; // χωρίς κλειδί δεν δείχνουμε τίποτα
+        }
+      }
+      if (!cancelled) setThermoStats((prev) => ({ ...prev, ...out }));
+    };
+    run();
+    const iv = setInterval(run, 10 * 60000);
+    return () => { cancelled = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sub, thermoConfig?.enabled, thermoConfig?.baseUrl, statSensorsKey]);
+
   const fetchThermoDevices = async () => {
     if (!thermoConfig?.baseUrl) return;
     setDevicesStatus("loading");
@@ -2613,6 +2643,16 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                         )}
                       </div>
                     </div>
+                    {thermoStats[st.id] && (() => {
+                      const ts2 = thermoStats[st.id];
+                      const f = (n) => n.toFixed(1).replace(".", ",");
+                      const maxBad = evalStation(st, String(ts2.max)) === false;
+                      return (
+                        <p className="text-[10px] text-slate-400 mt-0.5" title="Από το ιστορικό του ThermoServer, τελευταίες 24 ώρες">
+                          24ω: ελάχ. <b className="text-slate-600">{f(ts2.min)}°</b> · μέγ. <b className={maxBad ? "text-red-600" : "text-slate-600"}>{f(ts2.max)}°{maxBad ? " ⚠" : ""}</b>
+                        </p>
+                      );
+                    })()}
                     {outOfRange && (
                       <CorrectiveActionPanel value={dayActions[st.id]} onChange={(v) => setStationAction(st.id, v)} />
                     )}
