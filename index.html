@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.14"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.15"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -2205,8 +2205,12 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms, cardPrev })
   );
 }
 
-function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, cashData, setCashData, cashPlatforms, setCashPlatforms, cleanExtra, setCleanExtra, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo, thermoConfig }) {
+function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, cashData, setCashData, cashPlatforms, setCashPlatforms, cleanExtra, setCleanExtra, stations, setStations, displayItems, setDisplayItems, cleaningAreas, setCleaningAreas, shiftNames, setShiftNames, subTabLabels, setSubTabLabels, requestPrint, businessInfo, thermoConfig, adminCode, setAdminCode, adminRecovery, adminUnlocked, setAdminUnlocked }) {
   const [date, setDate] = useState(todayISO());
+  const [showDateUnlock, setShowDateUnlock] = useState(false);
+  // Χωρίς κωδικό διαχειριστή: έως 2 μέρες πίσω
+  const minDate = adminUnlocked ? null : cashAddDays(todayISO(), -2);
+  useEffect(() => { if (minDate && date < minDate) setDate(minDate); }, [minDate, date]);
   const [shift, setShift] = useState(() => { try { return getActiveShift(new Date()); } catch (e) { return "Α"; } });
   const [sub, setSub] = useState("temps");
   const [editingSubTabs, setEditingSubTabs] = useState(false);
@@ -2702,7 +2706,25 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       <Card className="mb-4">
         <div className="grid grid-cols-1 gap-1">
           <Field label="Ημερομηνία">
-            <input type="date" className={inputCls} value={date} onChange={(e) => setDate(e.target.value)} />
+            <input type="date" className={inputCls} value={date} min={minDate || undefined}
+              onChange={(e) => { const v = e.target.value; if (!v) return; setDate(minDate && v < minDate ? minDate : v); }} />
+            {!adminUnlocked ? (
+              <div className="mt-1">
+                <button onClick={() => setShowDateUnlock((v) => !v)} className="text-[10px] text-slate-400 underline">
+                  🔒 Μόνο οι τελευταίες 2 μέρες — παλαιότερες με κωδικό διαχειριστή
+                </button>
+                {showDateUnlock && (
+                  <div className="mt-1">
+                    <AdminGate code={adminCode} setCode={setAdminCode} recovery={adminRecovery} unlocked={false} setUnlocked={(v) => { setAdminUnlocked(v); if (v) setShowDateUnlock(false); }}>{null}</AdminGate>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="mt-1 flex items-center gap-2">
+                <span className="text-[10px] text-teal-700">🔓 Ξεκλείδωτο — βλέπεις και παλαιότερες ημερομηνίες</span>
+                <button onClick={() => setAdminUnlocked(false)} className="text-[10px] text-slate-500 underline">Κλείδωμα</button>
+              </div>
+            )}
           </Field>
           <Field label="Βάρδια">
             <div className="flex gap-2 mt-1">
@@ -5877,6 +5899,8 @@ function App() {
             requestPrint={requestPrint}
             businessInfo={businessInfo}
             thermoConfig={thermoConfig}
+            adminCode={adminCode} setAdminCode={setAdminCode} adminRecovery={adminRecovery}
+            adminUnlocked={adminUnlocked} setAdminUnlocked={setAdminUnlocked}
           />
         )}
         {tab === "haccp" && <HaccpFlowTab businessInfo={businessInfo} />}
