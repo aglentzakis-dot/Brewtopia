@@ -127,7 +127,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-22.4"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -194,6 +194,82 @@ function thermoRequest(baseUrl, path) {
 }
 
 const SHIFTS = ["Α", "Β", "Γ"];
+
+// Αυτόματη καταγραφή θερμοκρασιών σε προκαθορισμένες ώρες ανά βάρδια (τρέχει ΜΟΝΟ όσο η εφαρμογή είναι ανοιχτή).
+// - γράφει μόνο στην ΤΡΕΧΟΥΣΑ βάρδια της σημερινής ημέρας, ποτέ σε άλλη
+// - δεν πειράζει κελιά που έχουν ήδη τιμή (ούτε χειροκίνητη ούτε προηγούμενης καταγραφής)
+// - δεν γράφει μετρήσεις παλιότερες από 30 λεπτά (ο αισθητήρας μπορεί να έχει κολλήσει)
+// - ό,τι είναι εκτός ορίων εμφανίζεται κανονικά και ζητά διορθωτική ενέργεια από άνθρωπο
+const THERMO_AUTO_DONE_KEY = "brewtopia-thermo-auto";
+const THERMO_MAX_AGE_MS = 30 * 60000;
+const thermoAutoDoneRead = () => { try { return JSON.parse(window.localStorage.getItem(THERMO_AUTO_DONE_KEY) || "{}") || {}; } catch (e) { return {}; } };
+function useThermoAuto({ thermoConfig, stations, ccpData, setCcpData }) {
+  const ref = useRef({});
+  ref.current = { thermoConfig, stations, ccpData, setCcpData };
+  useEffect(() => {
+    let busy = false;
+    const lastTry = {};
+    const tick = async () => {
+      if (busy) return;
+      const { thermoConfig: cfg, stations: sts, ccpData: data } = ref.current;
+      if (!cfg || !cfg.enabled || !cfg.baseUrl || !cfg.autoOn) return;
+      const times = cfg.autoTimes || {};
+      const now = new Date();
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      const active = getActiveShift(now);
+      const date = todayISO();
+      const mk = monthKey(new Date(date));
+      const t = times[active];
+      if (!/^\d{2}:\d{2}$/.test(t || "")) return;
+      const tMin = Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5));
+      const sinceStart = nowMin - tMin;
+      if (sinceStart < 0 || sinceStart >= 240) return; // μέσα σε 4 ώρες από την ορισμένη ώρα (και μόνο στην ίδια βάρδια)
+      const key = date + "|" + active;
+      const done = thermoAutoDoneRead();
+      if (done[key]) return;
+      if (lastTry[key] && Date.now() - lastTry[key] < 5 * 60000) return;
+      const cur = data?.[mk]?.[date]?.[active] || {};
+      const missing = (sts || []).filter((st) => st.type !== "dry" && st.sensorId && (cur[st.id] === undefined || cur[st.id] === "" || cur[st.id] === "-"));
+      const mark = (n) => { try { const d = thermoAutoDoneRead(); d[key] = { at: Date.now(), n }; window.localStorage.setItem(THERMO_AUTO_DONE_KEY, JSON.stringify(d)); } catch (e) {} };
+      if (missing.length === 0) { mark(0); return; }
+      lastTry[key] = Date.now();
+      busy = true;
+      try {
+        const base = String(cfg.baseUrl || "").trim();
+        const u = (base.startsWith("http") ? base : `http://${base}`).replace(/\/$/, "");
+        const res = await thermoRequest(u, "/api/latest");
+        if (!res.ok) return;
+        const body = await res.json();
+        const lookup = Array.isArray(body) ? Object.fromEntries(body.map((d) => [d.id ?? d.device ?? d.deviceId, d])) : body;
+        const vals = {};
+        missing.forEach((st) => {
+          const r = lookup[st.sensorId];
+          const tv = r?.temperature ?? r?.temp ?? r?.value;
+          const fresh = typeof r?.ts !== "number" || Date.now() - r.ts <= THERMO_MAX_AGE_MS;
+          if (tv !== undefined && tv !== null && fresh) vals[st.id] = String(tv);
+        });
+        const n = Object.keys(vals).length;
+        if (n === 0) return;
+        const latest = ref.current.ccpData;
+        const next = { ...(latest || {}) };
+        next[mk] = { ...(next[mk] || {}) };
+        next[mk][date] = { ...(next[mk][date] || {}) };
+        const cur2 = next[mk][date][active] || {};
+        const add = {};
+        Object.keys(vals).forEach((k) => { if (cur2[k] === undefined || cur2[k] === "" || cur2[k] === "-") add[k] = vals[k]; });
+        if (Object.keys(add).length === 0) return;
+        next[mk][date][active] = { ...cur2, ...add };
+        ref.current.setCcpData(next);
+        if (n === missing.length) mark(n);
+      } catch (e) { /* χωρίς κλειδί ή χωρίς σύνδεση: ξαναδοκιμάζει σε 5 λεπτά */ } finally { busy = false; }
+    };
+    const iv = setInterval(tick, 30000);
+    const first = setTimeout(tick, 4000);
+    const vis = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", vis);
+    return () => { clearInterval(iv); clearTimeout(first); document.removeEventListener("visibilitychange", vis); };
+  }, []);
+}
 
 const DEFAULT_FRIDGE_STATIONS = [
   { id: "kat2", name: "Κατάψυξη 2 (θάλαμος)", type: "freezer" },
@@ -2121,6 +2197,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   const [thermoDevices, setThermoDevices] = useState([]);
   const [thermoMeasTs, setThermoMeasTs] = useState({}); // { stationId: ώρα μέτρησης (ms) } από το ThermoServer
   const [thermoNow, setThermoNow] = useState(Date.now());
+  const [thermoRec, setThermoRec] = useState(null); // { n, at, stale } — τελευταία ομαδική καταγραφή
   useEffect(() => { const t = setInterval(() => setThermoNow(Date.now()), 30000); return () => clearInterval(t); }, []);
   const [devicesStatus, setDevicesStatus] = useState(null);
   const [thermoCode, setThermoCode] = useState(null);
@@ -2161,8 +2238,10 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     }
   };
 
+  const thermoWrongShift = date !== todayKey || shift !== activeShift;
   const fetchThermoServer = async () => {
     if (!thermoConfig?.baseUrl) return;
+    if (date !== todayKey || shift !== activeShift) { setThermoStatus("wrong-shift"); return; } // ποτέ σε λάθος βάρδια/ημέρα
     setThermoStatus("loading");
     try {
       const res = await thermoFetch("/api/latest");
@@ -2190,6 +2269,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       });
       setThermoMeasTs(measTs);
       setThermoNow(Date.now());
+      if (matched > 0) setThermoRec({ n: matched, at: Date.now(), stale: Object.values(measTs).filter((ts) => Date.now() - ts > 30 * 60000).length });
       setCcpData(next);
       if (matched > 0) setThermoStatus("ok");
       else if (!anyMapped) setThermoStatus("no-sensors");
@@ -2411,12 +2491,17 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
             <div className="mb-3">
               <button
                 onClick={fetchThermoServer}
-                disabled={thermoStatus === "loading"}
+                disabled={thermoStatus === "loading" || thermoWrongShift}
                 className="text-xs px-3 py-1.5 rounded-lg bg-teal-700 text-white font-semibold flex items-center gap-1.5 disabled:opacity-60"
               >
                 <RotateCcw size={13} className={thermoStatus === "loading" ? "animate-spin" : ""} />
-                {thermoStatus === "loading" ? "Ανανέωση…" : "Ανανέωση από ThermoServer"}
+                {thermoStatus === "loading" ? "Καταγραφή…" : "Καταγραφή από αισθητήρες (όλα μαζί)"}
               </button>
+              {thermoWrongShift && (
+                <p className="text-[11px] text-amber-700 mt-1 font-semibold">
+                  Η καταγραφή από αισθητήρες γίνεται μόνο για την τρέχουσα βάρδια της σημερινής ημέρας ({shiftNames[activeShift] || activeShift}). Έχεις επιλέξει άλλη βάρδια ή ημέρα — οι ζωντανές μετρήσεις δεν γράφονται εκεί. Μπορείς να βάλεις τιμές με το χέρι.
+                </p>
+              )}
               {thermoStatus === "error" && (
                 <p className="text-[11px] text-red-600 mt-1">Δεν ήταν δυνατή η σύνδεση με το ThermoServer — έλεγξε τη διεύθυνση ή το δίκτυο.</p>
               )}
@@ -2439,7 +2524,10 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                 <p className="text-[11px] text-amber-600 mt-1">Συνδέθηκε επιτυχώς, αλλά δεν βρέθηκαν τιμές για τους συνδεδεμένους αισθητήρες — έλεγξε αν είναι σωστά επιλεγμένοι.</p>
               )}
               {thermoStatus === "ok" && (
-                <p className="text-[11px] text-teal-700 mt-1">Ενημερώθηκαν οι θερμοκρασίες από τους αισθητήρες.</p>
+                <p className="text-[11px] text-teal-700 mt-1">
+                  ✓ Καταγράφηκαν {thermoRec ? thermoRec.n : ""} θερμοκρασίες στη βάρδια{thermoRec ? ` (ώρα ${new Date(thermoRec.at).toLocaleTimeString("el-GR", { hour: "2-digit", minute: "2-digit" })})` : ""}. Μπορείς να τις διορθώσεις και με το χέρι.
+                  {thermoRec && thermoRec.stale > 0 && <b className="text-amber-700"> ⚠ {thermoRec.stale} από αυτές είναι παλιές (πάνω από 30 λεπτά) — έλεγξε τον αισθητήρα.</b>}
+                </p>
               )}
             </div>
           )}
@@ -3424,6 +3512,12 @@ function ThermoServerPanel({ config, setConfig }) {
             {" · "}
             {config.enabled ? <span className="text-teal-700 font-semibold">ενεργό</span> : <span className="text-slate-400">ανενεργό</span>}
           </p>
+          <p className="text-xs text-slate-600 mb-1">
+            Αυτόματη καταγραφή:{" "}
+            {config.autoOn
+              ? <b className="text-teal-700">{SHIFTS.filter((sh) => (config.autoTimes || {})[sh]).map((sh) => `${sh} ${(config.autoTimes || {})[sh]}`).join(" · ") || "καμία ώρα ορισμένη"}</b>
+              : <span className="text-slate-400">ανενεργή</span>}
+          </p>
           <p className="text-xs text-slate-600 mb-2">
             Κλειδί σε αυτή τη συσκευή: {hasKey ? <b className="text-teal-700">έχει οριστεί ••••••••</b> : <b className="text-red-600">Δεν έχει οριστεί κλειδί ThermoServer</b>}
           </p>
@@ -3449,6 +3543,24 @@ function ThermoServerPanel({ config, setConfig }) {
             <input type="checkbox" className="w-4 h-4 accent-teal-700" checked={!!draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
             Ενεργοποίηση αυτόματων θερμοκρασιών
           </label>
+          <div className="rounded-lg border border-slate-200 p-2">
+            <label className="flex items-center gap-2 text-sm text-slate-700 mb-1">
+              <input type="checkbox" className="w-4 h-4 accent-teal-700" checked={!!draft.autoOn} onChange={(e) => setDraft({ ...draft, autoOn: e.target.checked, autoTimes: draft.autoTimes || { Α: "09:00", Β: "17:00", Γ: "" } })} />
+              Αυτόματη καταγραφή σε ορισμένη ώρα ανά βάρδια
+            </label>
+            <p className="text-[11px] text-slate-500 mb-2">
+              Γίνεται μόνο όσο η εφαρμογή είναι ανοιχτή σε κάποια συσκευή. Γράφει μόνο στην τρέχουσα βάρδια, και μόνο σε κελιά που είναι άδεια. Αφήνεις κενή την ώρα για βάρδια που δεν θες.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {SHIFTS.map((sh) => (
+                <label key={sh} className="text-[11px] text-slate-600 flex items-center gap-1.5">
+                  Βάρδια {sh}
+                  <input type="time" className="border border-slate-300 rounded px-1.5 py-1 text-xs" value={(draft.autoTimes || {})[sh] || ""}
+                    onChange={(e) => setDraft({ ...draft, autoTimes: { ...(draft.autoTimes || {}), [sh]: e.target.value } })} />
+                </label>
+              ))}
+            </div>
+          </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={save} className="bg-teal-700 text-white px-4 py-2 rounded-lg text-sm font-semibold">Αποθήκευση</button>
             <button onClick={runTest} className="border border-teal-700 text-teal-700 px-4 py-2 rounded-lg text-sm">Δοκιμή σύνδεσης</button>
@@ -5163,6 +5275,8 @@ function App() {
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
+
+  useThermoAuto({ thermoConfig, stations, ccpData, setCcpData });
 
   const expiredBooklets = employees.filter((e) => {
     const d = daysUntil(e.healthExpiry);
