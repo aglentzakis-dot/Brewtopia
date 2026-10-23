@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.13"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.14"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -474,12 +474,12 @@ function cleanFreqMode(item) {
 
 function isoDatesInRange(fromISO, toISO) {
   const out = [];
-  let d = new Date(fromISO + "T00:00:00");
-  const end = new Date(toISO + "T00:00:00");
+  const d = new Date(fromISO + "T12:00:00Z"); // μεσημέρι UTC: καμία μετατόπιση ημέρας από ζώνη ώρας
+  const end = new Date(toISO + "T12:00:00Z");
   let guard = 0;
   while (d <= end && guard < 400) {
     out.push(d.toISOString().slice(0, 10));
-    d.setDate(d.getDate() + 1);
+    d.setUTCDate(d.getUTCDate() + 1);
     guard++;
   }
   return out;
@@ -487,10 +487,10 @@ function isoDatesInRange(fromISO, toISO) {
 
 function lastScheduledOnOrBefore(days, dateISO) {
   if (!days || days.length === 0) return null;
-  let d = new Date(dateISO + "T00:00:00");
+  const d = new Date(dateISO + "T12:00:00Z");
   for (let i = 0; i < 8; i++) {
-    if (days.includes(d.getDay())) return d.toISOString().slice(0, 10);
-    d.setDate(d.getDate() - 1);
+    if (days.includes(d.getUTCDay())) return d.toISOString().slice(0, 10);
+    d.setUTCDate(d.getUTCDate() - 1);
   }
   return null;
 }
@@ -3084,10 +3084,11 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
             </button>
           )}
           {!editingClean && cleaningAreas.map((group) => {
+            const dowToday = new Date(date + "T12:00:00Z").getUTCDay();
             const visibleItems = group.items.filter((item) => {
-              if (shouldShowCleanItem(item, cleanData, group.id, date)) return true;
+              if (!(item.days || []).length || item.days.includes(dowToday)) return true; // για σήμερα
               if (dayClean[`${group.id}__${item.id}`]) return true;
-              return !hideNotDue; // «δεν είναι για σήμερα»: αχνά, ή κρυμμένα με το μάτι
+              return !hideNotDue; // δεν είναι για σήμερα: αχνά, ή κρυμμένα με το μάτι
             });
             if (visibleItems.length === 0) return null;
             const todayShifts = cleanData?.[mk]?.[date] || {};
@@ -3100,7 +3101,8 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                     const val = dayClean[key] || "";
                     const scheduled = item.days && item.days.length > 0;
                     const openProb = cleanOpenProblem(cleanData, key, date, shift);
-                    const notDue = !val && !shouldShowCleanItem(item, cleanData, group.id, date);
+                    const notDue = !val && (item.days || []).length > 0 && !item.days.includes(dowToday);
+                    const missedSince = notDue && shouldShowCleanItem(item, cleanData, group.id, date) ? lastScheduledOnOrBefore(item.days, date) : null;
                     const otherShiftDone = scheduled && !val && !openProb
                       ? SHIFTS.find((s) => s !== shift && todayShifts?.[s]?.[key])
                       : null;
@@ -3123,6 +3125,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                         <div>
                           <p className="text-slate-700">{item.name}</p>
                           <p className="text-[10px] text-slate-400">{cleanFreqLabel(item)}</p>
+                          {missedSince && <p className="text-[10px] text-amber-700 font-semibold">δεν έχει γίνει από {missedSince.split("-").reverse().join("/")}</p>}
                           {openProb && (
                             <p className="text-[11px] text-red-700/80">
                               {openProb.own ? "Εντοπίστηκε πρόβλημα — εκκρεμεί καθαριότητα" : `Πρόβλημα από ${shiftNames[openProb.shift] || openProb.shift} (${openProb.date.split("-").reverse().join("/")}) — εκκρεμεί καθαριότητα (*) ή έλεγχος (✓)`}
