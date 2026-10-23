@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.6"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.7"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1775,6 +1775,32 @@ const BTN3D = "shadow-[0_3px_0_rgba(15,23,42,0.28)] active:translate-y-[2px] act
 const CASH_CLEARED = "∅"; // σήμα «διαγράφηκε» — ώστε η διαγραφή να περνά και στις άλλες συσκευές (το κενό δεν νικά ποτέ το γεμάτο)
 const cashNum = (v) => { const n = Number(String(v ?? "").replace(",", ".")); return Number.isFinite(n) && n > 0 ? n : 0; };
 const cashCents = (x) => Math.round(x * 100);
+// ---- Κάρτες POS: το ποσό που γράφεται είναι το ΣΥΝΟΛΙΚΟ του POS τη στιγμή του κλεισίματος (συσσωρευτικό). ----
+// Το καθαρό της βάρδιας = η τιμή μείον την τιμή της προηγούμενης βάρδιας (αν έχει καταχωρηθεί).
+// Σειρά βαρδιών μέσα στην ίδια ημερομηνία: Γ (βραδινή) → Α (πρωινή) → Β (μεσημεριανή) → Γ της επόμενης ημερομηνίας.
+const CASH_SLOT_ORDER = ["Γ", "Α", "Β"];
+const cashAddDays = (iso, n) => { const [y, m, d] = String(iso).split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+const cashHasVal = (v) => v !== undefined && v !== null && v !== "" && v !== "∅";
+// Επιστρέφει { cents, date, shift } της πλησιέστερης προηγούμενης καταχωρημένης τιμής (έως 3 βάρδιες πίσω), ή null
+function cashPrevValue(cashData, date, shift, key) {
+  const idx = CASH_SLOT_ORDER.indexOf(shift);
+  if (idx < 0) return null;
+  for (let step = 1; step <= 3; step++) {
+    const j = idx - step;
+    const dOff = Math.floor(j / 3);
+    const sh = CASH_SLOT_ORDER[((j % 3) + 3) % 3];
+    const d = dOff === 0 ? date : cashAddDays(date, dOff);
+    const rec = cashData?.[d.slice(0, 7)]?.[d]?.[sh];
+    if (rec && cashHasVal(rec[key])) return { cents: Math.round(cashNum(rec[key]) * 100), date: d, shift: sh };
+  }
+  return null;
+}
+// Καθαρό ποσό βάρδιας: { net, sub, reset } — αν η τιμή είναι μικρότερη από την προηγούμενη, θεωρείται μηδενισμός του POS (δεν αφαιρείται τίποτα)
+function cashNetCard(curCents, prev) {
+  if (!prev) return { net: curCents, sub: 0, reset: false };
+  if (curCents >= prev.cents) return { net: curCents - prev.cents, sub: prev.cents, reset: false };
+  return { net: curCents, sub: 0, reset: true };
+}
 const cashFmt = (cents) => (cents / 100).toLocaleString("el-GR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 const cashDenomLabel = (d) => (d >= 5 ? `${d} €` : `${String(d).replace(".", ",")} €`);
 
@@ -1863,7 +1889,7 @@ const cashEnter = (e) => {
   if (nxt) { nxt.focus(); try { nxt.select(); } catch (err) {} } else if (down) { e.target.blur(); }
 };
 
-function CashTab({ day, setField, clearAll, platforms, setPlatforms }) {
+function CashTab({ day, setField, clearAll, platforms, setPlatforms, cardPrev }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [editPl, setEditPl] = useState(false);
   const [newPl, setNewPl] = useState("");
@@ -1903,24 +1929,41 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms }) {
   };
   const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashNum(day["d" + String(d).replace(".", "_")]) * d), 0);
   const CARD_KEYS = ["pos1", "pos2"];
-  const cardTotal = CARD_KEYS.reduce((a, k) => a + cashCents(cashNum(day[k])), 0);
+  const cardNet = {};
+  CARD_KEYS.forEach((k) => { cardNet[k] = cashHasVal(day[k]) ? cashNetCard(cashCents(cashNum(day[k])), cardPrev && cardPrev[k]) : { net: 0, sub: 0, reset: false }; });
+  const cardTotal = CARD_KEYS.reduce((a, k) => a + cardNet[k].net, 0); // καθαρό βάρδιας
   const platformTotal = plShown.reduce((a, x) => a + cashCents(cashNum(day[x.id])), 0);
   const invoiceCents = cashCents(cashNum(day.invoices));
   const turnover = cashTotal + invoiceCents + cardTotal;      // τζίρος ταμείου: μετρητά + τιμολόγια + κάρτες
   const grandTotal = turnover + platformTotal;                 // + efood, Wolt, Box, Delivery
   const [showInv, setShowInv] = useState(false);
   const invOpen = showInv || invoiceCents > 0;
-  const moneyRow = ([k, label]) => (
-    <div key={k} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
-      <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">{label}</span>
-      <input
-        type="text" inputMode="decimal" enterKeyHint="next" placeholder="0,00" data-cash="1" onKeyDown={cashEnter} onFocus={focusCenter}
-        className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-base text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
-        value={cv(k)}
-        onChange={(e) => setField(k, e.target.value.replace(/[^0-9,.]/g, ""))}
-      />
-    </div>
-  );
+  const moneyRow = ([k, label]) => {
+    const isCard = CARD_KEYS.includes(k);
+    const pv = isCard && cardPrev ? cardPrev[k] : null;
+    const nt = isCard ? cardNet[k] : null;
+    return (
+      <div key={k} className="py-2 border-b border-slate-300">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-slate-700 min-w-0 truncate">{label}</span>
+          <input
+            type="text" inputMode="decimal" enterKeyHint="next" placeholder="0,00" data-cash="1" onKeyDown={cashEnter} onFocus={focusCenter}
+            className="w-28 border border-slate-300 rounded-lg px-2 py-1.5 text-base text-right focus:outline-none focus:ring-2 focus:ring-teal-600"
+            value={cv(k)}
+            onChange={(e) => setField(k, e.target.value.replace(/[^0-9,.]/g, ""))}
+          />
+        </div>
+        {isCard && cashHasVal(day[k]) && (
+          <p className="text-[11px] text-right mt-1 text-sky-800">
+            Καθαρό βάρδιας: <b>{cashFmt(nt.net)}</b>
+            {pv && !nt.reset && <span className="text-slate-500"> ({cashFmt(cashCents(cashNum(day[k])))} − {cashFmt(pv.cents)} της βάρδιας {pv.label})</span>}
+            {pv && nt.reset && <span className="text-amber-700"> (η τιμή είναι μικρότερη από την προηγούμενη {cashFmt(pv.cents)} — θεωρήθηκε μηδενισμός του POS, δεν αφαιρέθηκε τίποτα)</span>}
+            {!pv && <span className="text-slate-400"> (δεν βρέθηκε προηγούμενη βάρδια — μετρά ολόκληρο το ποσό)</span>}
+          </p>
+        )}
+      </div>
+    );
+  };
   return (
     <Card>
       <div className="rounded-xl bg-emerald-50 border border-emerald-200 p-3 mb-3 shadow-sm">
@@ -1941,7 +1984,7 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms }) {
         {CASH_OTHER.filter(([k]) => CARD_KEYS.includes(k)).map(moneyRow)}
       </div>
       <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2.5 rounded-xl bg-gradient-to-b from-sky-600 to-sky-800 text-white shadow-[0_3px_0_rgba(7,89,133,0.55)]">
-        <span className="text-sm font-bold">Σύνολο καρτών</span>
+        <span className="text-sm font-bold">Σύνολο καρτών (καθαρό βάρδιας)</span>
         <span className="text-base font-extrabold">{cashFmt(cardTotal)}</span>
       </div>
 
@@ -2305,6 +2348,11 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
   // --- oil ---
   const dayCash = cashData?.[mk]?.[date]?.[shift] || {};
+  const cardPrev = {};
+  ["pos1", "pos2"].forEach((k) => {
+    const pv = cashPrevValue(cashData, date, shift, k);
+    cardPrev[k] = pv ? { ...pv, label: (shiftNames && shiftNames[pv.shift]) || pv.shift } : null;
+  });
   const setCashField = (k, v) => {
     const next = { ...(cashData || {}) };
     next[mk] = { ...(next[mk] || {}) };
@@ -2739,7 +2787,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         </Card>
       )}
 
-      {sub === "cash" && <CashTab day={dayCash} setField={setCashField} clearAll={clearCashDay} platforms={cashPlatforms} setPlatforms={setCashPlatforms} />}
+      {sub === "cash" && <CashTab day={dayCash} setField={setCashField} clearAll={clearCashDay} platforms={cashPlatforms} setPlatforms={setCashPlatforms} cardPrev={cardPrev} />}
 
       {sub === "oil" && (
         <Card>
@@ -3997,7 +4045,9 @@ function CashReportsTab({ cashData, cashPlatforms, shiftNames }) {
       Object.keys(shifts).forEach((sh) => {
         const d = shifts[sh];
         if (!d || typeof d !== "object") return;
-        rows.push({ date, shift: sh, vals: cashSummarizeShift(d, platIds) });
+        const vals = cashSummarizeShift(d, platIds);
+        ["pos1", "pos2"].forEach((k) => { vals[k] = cashHasVal(d[k]) ? cashNetCard(vals[k], cashPrevValue(months, date, sh, k)).net : 0; }); // καθαρό βάρδιας
+        rows.push({ date, shift: sh, vals });
       });
     });
   });
@@ -4210,7 +4260,7 @@ function CashReportsTab({ cashData, cashPlatforms, shiftNames }) {
                 </tbody>
               </table>
             </div>
-            <p className="text-[10px] text-slate-400 mt-2">Σύνολο = μετρητά + κάρτες + υπηρεσίες + τιμολόγια (όσες κατηγορίες είναι ενεργές παραπάνω). Οι τιμές είναι ό,τι έχει καταχωρηθεί στην καρτέλα «Ταμείο».</p>
+            <p className="text-[10px] text-slate-400 mt-2">Σύνολο = μετρητά + κάρτες + υπηρεσίες + τιμολόγια (όσες κατηγορίες είναι ενεργές παραπάνω). Οι κάρτες POS υπολογίζονται ως καθαρό βάρδιας (τιμή μείον την προηγούμενη βάρδια). Οι υπόλοιπες τιμές είναι ό,τι έχει καταχωρηθεί στην καρτέλα «Ταμείο».</p>
           </Card>
         </>
       )}
