@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.9"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.11"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -428,6 +428,38 @@ const WEEKDAYS = [
   { idx: 1, label: "Δε" }, { idx: 2, label: "Τρ" }, { idx: 3, label: "Τε" }, { idx: 4, label: "Πε" },
   { idx: 5, label: "Πα" }, { idx: 6, label: "Σα" }, { idx: 0, label: "Κυ" },
 ];
+
+const WEEKDAY_SHORT = { 1: "Δευ", 2: "Τρί", 3: "Τετ", 4: "Πέμ", 5: "Παρ", 6: "Σάβ", 0: "Κυρ" };
+const WEEKDAY_LONG_ACC = { 1: "Δευτέρα", 2: "Τρίτη", 3: "Τετάρτη", 4: "Πέμπτη", 5: "Παρασκευή", 6: "Σάββατο", 0: "Κυριακή" };
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
+// Αυτόματο κείμενο συχνότητας από τις επιλεγμένες μέρες: «κάθε Τετάρτη», «Τετ · Σάβ», «Δευ–Τετ»
+function cleanFreqLabel(item) {
+  const days = (item && item.days) || [];
+  if (days.length === 0) {
+    const f = (item && item.freq) || "";
+    return !f || f === "—" ? "κάθε μέρα" : f;
+  }
+  if (days.length === 7) return "κάθε μέρα";
+  if (days.length === 1) return "κάθε " + WEEKDAY_LONG_ACC[days[0]];
+  const idxs = WEEK_ORDER.map((d, i) => (days.includes(d) ? i : -1)).filter((i) => i >= 0);
+  const parts = [];
+  let i = 0;
+  while (i < idxs.length) {
+    let j = i;
+    while (j + 1 < idxs.length && idxs[j + 1] === idxs[j] + 1) j++;
+    const first = WEEKDAY_SHORT[WEEK_ORDER[idxs[i]]], last = WEEKDAY_SHORT[WEEK_ORDER[idxs[j]]];
+    parts.push(j - i >= 2 ? first + "–" + last : idxs.slice(i, j + 1).map((x) => WEEKDAY_SHORT[WEEK_ORDER[x]]).join(" · "));
+    i = j + 1;
+  }
+  return parts.join(" · ");
+}
+// Τρόπος συχνότητας: "daily" | "days" | "custom"
+function cleanFreqMode(item) {
+  if (item.mode) return item.mode;
+  if ((item.days || []).length > 0) return "days";
+  const f = (item.freq || "").trim();
+  return !f || f === "—" || /^(καθημερινά|κάθε μέρα)$/i.test(f) ? "daily" : "custom";
+}
 
 function isoDatesInRange(fromISO, toISO) {
   const out = [];
@@ -1703,7 +1735,7 @@ function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
 
   const rows = [];
   cleaningAreas.forEach((group) => {
-    group.items.forEach((item) => rows.push({ key: `${group.id}__${item.id}`, name: item.name, area: group.area }));
+    group.items.forEach((item) => rows.push({ key: `${group.id}__${item.id}`, name: item.name, area: group.area, days: item.days || [] }));
   });
 
   return (
@@ -1727,8 +1759,9 @@ function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
                 {dayCols.map((d) => {
                   const dateISO = `${month}-${String(d).padStart(2, "0")}`;
                   const done = SHIFTS.some((s) => cleanData?.[month]?.[dateISO]?.[s]?.[r.key]);
+                  const sched = r.days.length > 0 && r.days.includes(new Date(y, m - 1, d).getDay());
                   return (
-                    <td key={d} className={`border border-slate-200 w-6 h-6 text-center ${done ? "bg-teal-500" : ""}`}></td>
+                    <td key={d} className={`w-6 h-6 text-center ${sched ? "border-2 border-teal-300" : "border border-slate-200"} ${done ? "bg-teal-500" : ""}`}></td>
                   );
                 })}
               </tr>
@@ -1739,7 +1772,7 @@ function MonthlyCleaningGrid({ cleaningAreas, cleanData, month }) {
           )}
         </tbody>
       </table>
-      <p className="text-[10px] text-slate-400 mt-2">Πράσινο = έγινε καθαριότητα εκείνη τη μέρα. Κόκκινο όνομα = πάνω από 25 μέρες χωρίς καμία καταχώρηση.</p>
+      <p className="text-[10px] text-slate-400 mt-2">Πράσινο = έγινε καθαριότητα εκείνη τη μέρα. Αχνό πλαίσιο = μέρα που είναι προγραμματισμένη. Κόκκινο όνομα = πάνω από 25 μέρες χωρίς καμία καταχώρηση.</p>
     </Card>
   );
 }
@@ -1792,7 +1825,18 @@ function cleanOpenProblem(cleanData, key, date, shift) {
     const sh = CASH_SLOT_ORDER[((j % 3) + 3) % 3];
     const d = cashAddDays(date, dOff);
     const mark = cleanData?.[d.slice(0, 7)]?.[d]?.[sh]?.[key];
-    if (mark === "Χ" || mark === "X") return { date: d, shift: sh, own: step === 0 };
+    if (mark === "Χ" || mark === "X") {
+      if (step === 0) {
+        // η ίδια η βάρδια με το Χ: σβήνει το αχνό κόκκινο αν σε μεταγενέστερη βάρδια έγινε ✓ ή *
+        for (let f = 1; f <= 270; f++) {
+          const jj = idx + f;
+          const dd = cashAddDays(date, Math.floor(jj / 3));
+          const m2 = cleanData?.[dd.slice(0, 7)]?.[dd]?.[CASH_SLOT_ORDER[((jj % 3) + 3) % 3]]?.[key];
+          if (m2 === "✓" || m2 === "*") return null;
+        }
+      }
+      return { date: d, shift: sh, own: step === 0 };
+    }
     if (mark === "✓" || mark === "*") return null;
   }
   return null;
@@ -2230,6 +2274,19 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
     });
     setCleaningAreas(next);
   };
+  const setCleanFreqMode = (gIdx, iIdx, mode) => {
+    const next = cleaningAreas.map((g, i) => {
+      if (i !== gIdx) return g;
+      const items = g.items.map((it, ii) => {
+        if (ii !== iIdx) return it;
+        if (mode === "daily") return { ...it, mode, days: [], freq: "Κάθε μέρα" };
+        if (mode === "days") return { ...it, mode, freq: cleanFreqLabel({ ...it, days: it.days || [] }) };
+        return { ...it, mode, days: [], freq: it.freq && it.freq !== "—" && it.freq !== "Κάθε μέρα" ? it.freq : "" };
+      });
+      return { ...g, items };
+    });
+    setCleaningAreas(next);
+  };
   const toggleCleanItemDay = (gIdx, iIdx, dayIdx) => {
     const next = cleaningAreas.map((g, i) => {
       if (i !== gIdx) return g;
@@ -2237,12 +2294,14 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
         if (ii !== iIdx) return it;
         const days = it.days || [];
         const nextDays = days.includes(dayIdx) ? days.filter((d) => d !== dayIdx) : [...days, dayIdx];
-        return { ...it, days: nextDays };
+        return { ...it, mode: "days", days: nextDays, freq: cleanFreqLabel({ ...it, days: nextDays }) };
       });
       return { ...g, items };
     });
     setCleaningAreas(next);
   };
+  const [hideNotDue, setHideNotDue] = useState(() => { try { return localStorage.getItem("brewtopia:clean-hide-notdue") === "1"; } catch (e) { return false; } });
+  const toggleHideNotDue = () => { const v = !hideNotDue; setHideNotDue(v); try { localStorage.setItem("brewtopia:clean-hide-notdue", v ? "1" : "0"); } catch (e) {} };
 
   const mk = monthKey(new Date(date));
 
@@ -2885,8 +2944,17 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
       {sub === "clean" && (
         <div className="space-y-3">
+          {!editingClean && cleaningAreas.some((g) => g.items.some((it) => (it.days || []).length > 0)) && (
+            <button onClick={toggleHideNotDue} className="text-[11px] text-slate-500 border border-slate-300 rounded-lg px-2 py-1 bg-white">
+              {hideNotDue ? "👁 Εμφάνιση και των εργασιών που δεν είναι για σήμερα" : "🙈 Απόκρυψη εργασιών που δεν είναι για σήμερα (αχνές)"}
+            </button>
+          )}
           {!editingClean && cleaningAreas.map((group) => {
-            const visibleItems = group.items.filter((item) => shouldShowCleanItem(item, cleanData, group.id, date));
+            const visibleItems = group.items.filter((item) => {
+              if (shouldShowCleanItem(item, cleanData, group.id, date)) return true;
+              if (dayClean[`${group.id}__${item.id}`]) return true;
+              return !hideNotDue; // «δεν είναι για σήμερα»: αχνά, ή κρυμμένα με το μάτι
+            });
             if (visibleItems.length === 0) return null;
             const todayShifts = cleanData?.[mk]?.[date] || {};
             return (
@@ -2898,6 +2966,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                     const val = dayClean[key] || "";
                     const scheduled = item.days && item.days.length > 0;
                     const openProb = cleanOpenProblem(cleanData, key, date, shift);
+                    const notDue = !val && !shouldShowCleanItem(item, cleanData, group.id, date);
                     const otherShiftDone = scheduled && !val && !openProb
                       ? SHIFTS.find((s) => s !== shift && todayShifts?.[s]?.[key])
                       : null;
@@ -2916,13 +2985,13 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                     }
 
                     return (
-                      <div key={key} className={`flex items-center justify-between text-sm gap-2 ${openProb ? "bg-red-600 text-white rounded-lg px-2 py-1.5 ring-2 ring-red-300" : ""}`}>
+                      <div key={key} className={`flex items-center justify-between text-sm gap-2 ${openProb ? "bg-red-50 border border-red-200 rounded-lg px-2 py-1" : notDue ? "opacity-50" : ""}`}>
                         <div>
-                          <p className={openProb ? "font-bold text-white" : "text-slate-700"}>{openProb ? "🔴 " : ""}{item.name}</p>
-                          <p className={`text-[10px] ${openProb ? "text-red-100" : "text-slate-400"}`}>{item.freq}</p>
+                          <p className="text-slate-700">{item.name}</p>
+                          <p className="text-[10px] text-slate-400">{cleanFreqLabel(item)}</p>
                           {openProb && (
-                            <p className="text-[11px] font-semibold text-white">
-                              {openProb.own ? "Εντοπίστηκε πρόβλημα — χρειάζεται καθαριότητα" : `Πρόβλημα από ${shiftNames[openProb.shift] || openProb.shift} (${openProb.date.split("-").reverse().join("/")}) — να γίνει καθαριότητα (*) ή έλεγχος (✓)`}
+                            <p className="text-[11px] text-red-700/80">
+                              {openProb.own ? "Εντοπίστηκε πρόβλημα — εκκρεμεί καθαριότητα" : `Πρόβλημα από ${shiftNames[openProb.shift] || openProb.shift} (${openProb.date.split("-").reverse().join("/")}) — εκκρεμεί καθαριότητα (*) ή έλεγχος (✓)`}
                             </p>
                           )}
                         </div>
@@ -3016,17 +3085,21 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                             onChange={(e) => renameCleanItem(gIdx, iIdx, "name", e.target.value)}
                             className="flex-1 text-slate-600 bg-transparent border-b border-dashed border-slate-300 focus:outline-none focus:border-teal-500 py-0.5"
                           />
-                          <input
-                            value={item.freq}
-                            onChange={(e) => renameCleanItem(gIdx, iIdx, "freq", e.target.value)}
-                            className="w-20 text-slate-400 bg-transparent border-b border-dashed border-slate-300 focus:outline-none focus:border-teal-500 py-0.5 text-[10px]"
-                          />
                           <button onClick={() => removeCleanItem(gIdx, iIdx)} className="w-6 h-6 shrink-0 rounded border border-red-200 text-red-600 flex items-center justify-center">
                             <Trash2 size={11} />
                           </button>
                         </div>
-                        <div className="flex gap-1 pl-9 mt-1">
-                          {WEEKDAYS.map((wd) => {
+                        <div className="flex flex-wrap items-center gap-1 pl-9 mt-1">
+                          <select
+                            value={cleanFreqMode(item)}
+                            onChange={(e) => setCleanFreqMode(gIdx, iIdx, e.target.value)}
+                            className="text-[11px] border border-slate-300 rounded-lg px-1.5 py-1 bg-white text-slate-600"
+                          >
+                            <option value="daily">Κάθε μέρα</option>
+                            <option value="days">Συγκεκριμένες μέρες…</option>
+                            <option value="custom">Άλλο (γράφω εγώ)</option>
+                          </select>
+                          {cleanFreqMode(item) === "days" && WEEKDAYS.map((wd) => {
                             const active = (item.days || []).includes(wd.idx);
                             return (
                               <button
@@ -3038,8 +3111,16 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                               >{wd.label}</button>
                             );
                           })}
-                          <span className="text-[9px] text-slate-400 self-center ml-1">
-                            {(item.days || []).length === 0 ? "κάθε μέρα" : "επιλεγμένες μέρες"}
+                          {cleanFreqMode(item) === "custom" && (
+                            <input
+                              value={item.freq === "—" ? "" : item.freq}
+                              placeholder="π.χ. μηνιαία"
+                              onChange={(e) => renameCleanItem(gIdx, iIdx, "freq", e.target.value)}
+                              className="w-28 text-[11px] text-slate-600 border border-slate-300 rounded-lg px-1.5 py-1"
+                            />
+                          )}
+                          <span className="text-[10px] text-teal-700 font-semibold ml-1">
+                            {cleanFreqMode(item) === "days" && (item.days || []).length === 0 ? "διάλεξε μέρες" : cleanFreqLabel(item)}
                           </span>
                         </div>
                       </div>
