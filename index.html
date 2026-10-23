@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.15"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.16"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -5173,6 +5173,8 @@ function useDriveSync({ applyRef, fallbackTextRef, dataKey }) {
 
   const getToken = (interactive) => new Promise((resolve, reject) => {
     if (tokenRef.current && tokenRef.current.exp > Date.now() + 60000) return resolve(tokenRef.current.value);
+    // Αυτόματος γύρος (χωρίς πάτημα κουμπιού): ΠΟΤΕ δεν ανοίγουμε παράθυρο Google — αλλιώς αναβοσβήνουν άδειες καρτέλες (about:blank).
+    if (!interactive) return reject(Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true }));
     syncLoadGis().then(() => {
       let done = false;
       const timer = setTimeout(() => { if (!done) { done = true; reject(Object.assign(new Error("Χρειάζεται σύνδεση με Google."), { needsLogin: true })); } }, interactive ? 90000 : 15000);
