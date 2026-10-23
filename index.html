@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.16"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.18"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -194,7 +194,7 @@ function thermoRequest(baseUrl, path) {
   return fetch(`${u}${path}`, { headers: { "CF-Access-Client-Id": key.id, "CF-Access-Client-Secret": key.secret }, cache: "no-store" });
 }
 
-const SHIFTS = ["Α", "Β", "Γ"];
+const SHIFTS = ["Γ", "Α", "Β"]; // σειρά βαρδιών: Βραδινή → Πρωινή → Μεσημεριανή
 
 // Αυτόματη καταγραφή θερμοκρασιών σε προκαθορισμένες ώρες ανά βάρδια (τρέχει ΜΟΝΟ όσο η εφαρμογή είναι ανοιχτή).
 // - γράφει μόνο στην ΤΡΕΧΟΥΣΑ βάρδια της σημερινής ημέρας, ποτέ σε άλλη
@@ -1859,7 +1859,17 @@ function NewCleanAreaForm({ onAdd }) {
    ΤΑΜΕΙΟ ΒΑΡΔΙΑΣ — μέτρημα χαρτονομισμάτων, κερμάτων και ποσών καρτών/πλατφορμών
    ============================================================ */
 const CASH_NOTES = [100, 50, 20, 10, 5];
-const CASH_COINS = [2, 1, 0.5, 0.2, 0.1];
+const CASH_COINS = [2, 1, 0.5, 0.2, 0.1, 0.05];
+// Βάρος κάθε κέρματος σε γραμμάρια (για καταμέτρηση με ζύγιση)
+const CASH_COIN_GRAMS = { 2: 8.5, 1: 7.5, 0.5: 7.8, 0.2: 5.74, 0.1: 4.1, 0.05: 3.92 };
+const cashKeyOf = (d) => "d" + String(d).replace(".", "_");
+// Τεμάχια ενός είδους: αν έχουν γραφτεί γραμμάρια (μόνο κέρματα), υπολογίζονται από το βάρος· αλλιώς όσα γράφτηκαν
+const cashQty = (day, d) => {
+  const k = cashKeyOf(d);
+  const w = CASH_COIN_GRAMS[d];
+  const g = w ? cashNum(day?.["g_" + k]) : 0;
+  return g > 0 ? Math.round(g / w) : cashNum(day?.[k]);
+};
 const CASH_OTHER = [
   ["pos1", "Κάρτες POS 1"], ["pos2", "Κάρτες POS 2"], ["efood", "efood"],
   ["wolt", "Wolt"], ["box", "Box"], ["delivery", "Delivery"],
@@ -2042,16 +2052,42 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms, cardPrev })
   );
   const row = (d) => {
     const key = "d" + String(d).replace(".", "_");
-    const lineCents = cashCents(cashNum(day[key]) * d);
+    const qty = cashQty(day, d);
+    const lineCents = cashCents(qty * d);
+    const w = CASH_COIN_GRAMS[d];
+    const gKey = "g_" + key;
+    const grams = w ? cashNum(day[gKey]) : 0;
+    const byWeight = grams > 0;
+    const off = byWeight && Math.abs(grams / w - Math.round(grams / w)) > 0.3; // το βάρος δεν βγάζει σχεδόν ακέραιο αριθμό κερμάτων
     return (
-      <div key={key} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
-        <span className="text-sm font-semibold text-slate-700 w-20">{cashDenomLabel(d)}</span>
-        <span className="text-[11px] text-slate-400 flex-1 text-right">{lineCents > 0 ? cashFmt(lineCents) : ""}</span>
-        {qtyInput(key)}
+      <div key={key} className="py-2 border-b border-slate-300">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-semibold text-slate-700 w-20">{cashDenomLabel(d)}</span>
+          {w && (
+            <span className="flex items-center gap-1" title={`Ζύγισε τα κέρματα: 1 τεμάχιο = ${String(w).replace(".", ",")} γρ.`}>
+              <input
+                type="text" inputMode="decimal" placeholder="γρ." aria-label={`Γραμμάρια κερμάτων ${cashDenomLabel(d)}`}
+                className="w-16 border border-amber-300 bg-white rounded-lg px-1.5 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
+                value={cv(gKey)}
+                onChange={(e) => setField(gKey, e.target.value.replace(/[^0-9,.]/g, ""))}
+              />
+              <span className="text-[10px] text-slate-400">γρ.</span>
+            </span>
+          )}
+          <span className="text-[11px] text-slate-400 flex-1 text-right">{lineCents > 0 ? cashFmt(lineCents) : ""}</span>
+          {byWeight ? (
+            <div className="w-20 border border-slate-200 bg-slate-50 rounded-lg px-2 py-1.5 text-base text-right text-slate-700 font-semibold" title="Υπολογίστηκε από τα γραμμάρια — σβήσε τα γραμμάρια για να γράψεις τεμάχια">{qty}</div>
+          ) : qtyInput(key)}
+        </div>
+        {byWeight && (
+          <p className={`text-[10px] text-right mt-0.5 ${off ? "text-amber-700 font-semibold" : "text-slate-400"}`}>
+            {String(grams).replace(".", ",")} γρ. ÷ {String(w).replace(".", ",")} γρ. = {qty} τεμ.{off ? " ⚠ το βάρος δεν βγάζει ακέραιο αριθμό κερμάτων — έλεγξε" : ""}
+          </p>
+        )}
       </div>
     );
   };
-  const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashNum(day["d" + String(d).replace(".", "_")]) * d), 0);
+  const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashQty(day, d) * d), 0);
   const CARD_KEYS = ["pos1", "pos2"];
   const cardNet = {};
   CARD_KEYS.forEach((k) => { cardNet[k] = cashHasVal(day[k]) ? cashNetCard(cashCents(cashNum(day[k])), cardPrev && cardPrev[k]) : { net: 0, sub: 0, reset: false }; });
@@ -2095,7 +2131,7 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms, cardPrev })
         {CASH_NOTES.map(row)}
       </div>
       <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-wide text-amber-800 mb-1">🪙 Κέρματα (γράψε πόσα τεμάχια)</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-amber-800 mb-1">🪙 Κέρματα (τεμάχια δεξιά ή γραμμάρια αριστερά)</p>
         {CASH_COINS.map(row)}
       </div>
       <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2.5 rounded-xl bg-gradient-to-b from-emerald-600 to-emerald-800 text-white shadow-[0_3px_0_rgba(6,78,59,0.55)]">
@@ -4307,7 +4343,7 @@ const cashIsDenomKey = (k) => /^d\d+(_\d+)?$/.test(k);
 const cashFmtPlain = (cents) => (cents / 100).toFixed(2).replace(".", ",");
 
 function cashSummarizeShift(sh, platIds) {
-  const cash = CASH_NOTES.concat(CASH_COINS).reduce((a, d) => a + cashCents(cashNum(sh["d" + String(d).replace(".", "_")]) * d), 0);
+  const cash = CASH_NOTES.concat(CASH_COINS).reduce((a, d) => a + cashCents(cashQty(sh, d) * d), 0);
   const vals = { cash, pos1: cashCents(cashNum(sh.pos1)), pos2: cashCents(cashNum(sh.pos2)), invoices: cashCents(cashNum(sh.invoices)) };
   platIds.forEach((id) => { vals[id] = cashCents(cashNum(sh[id])); });
   return vals;
@@ -5607,7 +5643,7 @@ function App() {
       });
     });
     if (!needsMigration) return;
-    const firstShiftId = SHIFTS[0];
+    const firstShiftId = "Α"; // τα παλιά δεδομένα πήγαιναν πάντα στην Πρωινή
     const next = {};
     Object.entries(oilData).forEach(([mk, days]) => {
       next[mk] = {};
