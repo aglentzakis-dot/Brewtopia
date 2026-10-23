@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.3"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-23.6"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -1850,13 +1850,17 @@ const focusCenter = (e) => {
 
 // Υπολογιστής (ποντίκι/πληκτρολόγιο): το Enter περνά στο επόμενο πεδίο του ταμείου, μέχρι το τέλος. Στο κινητό το αναλαμβάνει το πλήκτρο «Επόμενο» του πληκτρολογίου.
 const cashEnter = (e) => {
-  // Υπολογιστής ΚΑΙ κινητό: το Enter / «Επόμενο» του πληκτρολογίου περνά στο επόμενο πεδίο
-  if ((e.key !== "Enter" && e.keyCode !== 13) || e.isComposing) return;
+  if (e.isComposing) return;
+  // Enter ή ▼ = επόμενο πεδίο · ▲ ή Shift+Enter = προηγούμενο πεδίο (χωρίς ποντίκι)
+  const isEnter = e.key === "Enter" || e.keyCode === 13;
+  const down = e.key === "ArrowDown" || (isEnter && !e.shiftKey);
+  const up = e.key === "ArrowUp" || (isEnter && e.shiftKey);
+  if (!down && !up) return;
   e.preventDefault();
   const all = Array.from(document.querySelectorAll("input[data-cash]"));
   const i = all.indexOf(e.target);
-  const nxt = i >= 0 ? all[i + 1] : null;
-  if (nxt) { nxt.focus(); try { nxt.select(); } catch (err) {} } else { e.target.blur(); }
+  const nxt = i >= 0 ? all[i + (down ? 1 : -1)] : null;
+  if (nxt) { nxt.focus(); try { nxt.select(); } catch (err) {} } else if (down) { e.target.blur(); }
 };
 
 function CashTab({ day, setField, clearAll, platforms, setPlatforms }) {
@@ -3398,6 +3402,7 @@ function BusinessInfoPanel({ info, setInfo }) {
       {!editing ? (
         <>
           <ScreenLetterhead info={info} />
+          <p className="text-[11px] text-slate-500 mb-1">E-mail επιχείρησης: <b className="text-slate-700">{info.email ? info.email : "— δεν έχει οριστεί —"}</b></p>
           <button onClick={() => { setDraft(info); setEditing(true); }} className="text-[11px] text-teal-700 underline">
             Επεξεργασία στοιχείων
           </button>
@@ -3418,6 +3423,12 @@ function BusinessInfoPanel({ info, setInfo }) {
           </Field>
           <Field label="Διεύθυνση">
             <input className={inputCls} value={draft.address} onChange={(e) => setDraft({ ...draft, address: e.target.value })} />
+          </Field>
+          <Field label="E-mail επιχείρησης (και για την ανάκτηση κωδικού)">
+            <input className={inputCls} type="email" autoComplete="email" placeholder="π.χ. onoma@gmail.com" value={draft.email || ""} onChange={(e) => setDraft({ ...draft, email: e.target.value })} />
+            <p className="text-[11px] text-slate-500 mt-1">
+              Χρησιμοποιείται για την επαναφορά του κωδικού διαχειριστή (σύνδεση με Google). Για να δουλέψει πρέπει να είναι λογαριασμός Google (π.χ. Gmail). Αν θες άλλο e-mail μόνο για την ανάκτηση, ορίζεται στις Ρυθμίσεις → Ασφάλεια. Δεν τυπώνεται στα έντυπα.
+            </p>
           </Field>
           <Field label="Χρώμα θέματος (κεφαλίδα)">
             <div className="flex flex-wrap gap-2 items-center">
@@ -3620,6 +3631,9 @@ function adminOwnerEmail() {
   try {
     const own = window.localStorage.getItem(ADMIN_OWNER_KEY);
     if (own) return String(JSON.parse(own) || "").toLowerCase();
+    // αλλιώς: το e-mail της επιχείρησης (Ρυθμίσεις → Επιχείρηση)
+    const biz = JSON.parse(window.localStorage.getItem(STORAGE_PREFIX + "business-info") || "null");
+    if (biz && typeof biz.email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(biz.email.trim())) return biz.email.trim().toLowerCase();
     const acc = JSON.parse(window.localStorage.getItem("brewtopia-sync-account") || "null");
     return acc && acc.email ? String(acc.email).toLowerCase() : "";
   } catch (e) { return ""; }
@@ -3736,7 +3750,7 @@ function AdminCodePanel({ code, setCode, recovery, setRecovery }) {
       <div className="mt-3 pt-3 border-t border-slate-200">
         <p className="text-xs font-semibold text-slate-700 mb-1">E-mail ανάκτησης (αν ξεχάσεις τον κωδικό)</p>
         <p className="text-[11px] text-slate-500 mb-2">
-          {ownerMail ? <>Ισχύει ο λογαριασμός <b className="text-slate-800">{ownerMail}</b>. </> : "Δεν έχει οριστεί ακόμα. "}
+          {ownerMail ? <>Ισχύει το <b className="text-slate-800">{ownerMail}</b> (το e-mail της επιχείρησης, εκτός αν ορίσεις άλλο εδώ). </> : "Δεν έχει οριστεί ακόμα — βάλε e-mail στα στοιχεία επιχείρησης ή όρισε λογαριασμό εδώ. "}
           Δεν στέλνεται μήνυμα: όταν ξεχάσεις τον κωδικό πατάς «Επαναφορά με Google» και συνδέεσαι με αυτόν τον λογαριασμό για να βάλεις νέο.
         </p>
         {!mailMode ? (
@@ -4047,6 +4061,14 @@ function CashReportsTab({ cashData, cashPlatforms, shiftNames }) {
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
   };
 
+  const addDaysISO = (iso, n) => { const [y, m, d] = iso.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10); };
+  const addMonthsKey = (key, n) => { const [y, m] = key.split("-").map(Number); return new Date(Date.UTC(y, m - 1 + n, 1)).toISOString().slice(0, 7); };
+  const spin = (onUp, onDown) => (
+    <span className="inline-flex flex-col ml-1.5">
+      <button type="button" onClick={onUp} aria-label="Επόμενο" className="w-8 h-5 flex items-center justify-center rounded-t border border-slate-300 text-slate-600 text-[10px] bg-white active:bg-slate-100">▲</button>
+      <button type="button" onClick={onDown} aria-label="Προηγούμενο" className="w-8 h-5 flex items-center justify-center rounded-b border border-t-0 border-slate-300 text-slate-600 text-[10px] bg-white active:bg-slate-100">▼</button>
+    </span>
+  );
   const chip = (on, onClick, label) => (
     <button key={label} onClick={onClick} className={`text-[11px] px-2.5 py-1 rounded-full border ${on ? "bg-teal-700 text-white border-teal-700" : "border-slate-300 text-slate-500 bg-white"}`}>{label}</button>
   );
@@ -4062,9 +4084,27 @@ function CashReportsTab({ cashData, cashPlatforms, shiftNames }) {
         <div className="flex flex-wrap gap-1.5 mb-2">
           {[["day", "Ημέρα"], ["month", "Μήνας"], ["year", "Έτος"], ["range", "Από–Έως"]].map(([id, l]) => chip(mode === id, () => setMode(id), l))}
         </div>
-        {mode === "day" && <input type="date" className={inputCls + " max-w-[200px]"} value={dayV} onChange={(e) => setDayV(e.target.value)} />}
-        {mode === "month" && <input type="month" className={inputCls + " max-w-[200px]"} value={monthV} onChange={(e) => setMonthV(e.target.value)} />}
-        {mode === "year" && <input type="number" min="2000" max="2100" className={inputCls + " max-w-[120px]"} value={yearV} onChange={(e) => setYearV(e.target.value)} />}
+        {mode === "day" && (
+          <div className="flex items-center">
+            <input type="date" className={inputCls + " max-w-[200px]"} value={dayV} onChange={(e) => e.target.value && setDayV(e.target.value)} />
+            {spin(() => setDayV(addDaysISO(dayV, 1)), () => setDayV(addDaysISO(dayV, -1)))}
+            <button type="button" onClick={() => setDayV(today)} className="ml-2 text-[11px] text-teal-700 underline">Σήμερα</button>
+          </div>
+        )}
+        {mode === "month" && (
+          <div className="flex items-center">
+            <input type="month" className={inputCls + " max-w-[200px]"} value={monthV} onChange={(e) => e.target.value && setMonthV(e.target.value)} />
+            {spin(() => setMonthV(addMonthsKey(monthV, 1)), () => setMonthV(addMonthsKey(monthV, -1)))}
+            <button type="button" onClick={() => setMonthV(today.slice(0, 7))} className="ml-2 text-[11px] text-teal-700 underline">Τρέχων</button>
+          </div>
+        )}
+        {mode === "year" && (
+          <div className="flex items-center">
+            <input type="number" min="2000" max="2100" className={inputCls + " max-w-[120px]"} value={yearV} onChange={(e) => setYearV(e.target.value)} />
+            {spin(() => setYearV(String((Number(yearV) || Number(today.slice(0, 4))) + 1)), () => setYearV(String((Number(yearV) || Number(today.slice(0, 4))) - 1)))}
+            <button type="button" onClick={() => setYearV(today.slice(0, 4))} className="ml-2 text-[11px] text-teal-700 underline">Τρέχον</button>
+          </div>
+        )}
         {mode === "range" && (
           <div className="flex flex-wrap items-center gap-2">
             <input type="date" className={inputCls + " max-w-[170px]"} value={fromV} onChange={(e) => setFromV(e.target.value)} />
@@ -4441,7 +4481,7 @@ function MonthlyRetentionPanel({ ccpData, setCcpData, cleanData, setCleanData, o
   );
 }
 
-function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, adminRecovery, setAdminRecovery, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig, sync }) {
+function ArchiveTab({ cashData, cashPlatforms, shiftNames, adminUnlocked, setAdminUnlocked, staffDevice, records, setRecords, getBackupText, onImport, ccpData, setCcpData, cleanData, setCleanData, oilData, setOilData, businessInfo, setBusinessInfo, technicianVisits, setTechnicianVisits, adminCode, setAdminCode, adminRecovery, setAdminRecovery, safetyTechnician, setSafetyTechnician, thermoConfig, setThermoConfig, sync }) {
   const [form, setForm] = useState(null);
 
   const startNew = () => setForm({ id: uid(), code: "", from: "", to: "", destroyDate: "", notes: "", responsible: "" });
@@ -4458,6 +4498,14 @@ function ArchiveTab({ records, setRecords, getBackupText, onImport, ccpData, set
       <SectionTitle icon={Archive} sub="Καταγραφή πότε τηρήθηκαν και πότε καταστράφηκαν παλιά συμπληρωμένα έντυπα.">
         Αρχειοθέτηση & Καταστροφή Εντύπων
       </SectionTitle>
+
+      {!staffDevice && (
+        <SettingsGroup icon={BarChart3} title="Αναφορές ταμείου" hint="Σύνολα ανά ημέρα, μήνα, έτος — με κωδικό διαχειριστή">
+          <AdminGate code={adminCode} setCode={setAdminCode} recovery={adminRecovery} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
+            <CashReportsTab cashData={cashData} cashPlatforms={cashPlatforms} shiftNames={shiftNames} />
+          </AdminGate>
+        </SettingsGroup>
+      )}
 
       <TechnicianVisitsPanel visits={technicianVisits} setVisits={setTechnicianVisits} />
 
@@ -5269,7 +5317,7 @@ function App() {
   const adminLeftAtRef = useRef(null);
   const prevTabRef = useRef(tab);
   useEffect(() => {
-    const isAdminTab = (t) => t === "employees" || t === "training" || t === "reports";
+    const isAdminTab = (t) => t === "employees" || t === "training" || t === "archive";
     const wasAdmin = isAdminTab(prevTabRef.current);
     const isAdmin = isAdminTab(tab);
     if (wasAdmin && !isAdmin) {
@@ -5411,13 +5459,12 @@ function App() {
 
   // Συσκευή προσωπικού (τσεκαρισμένη στο πάνελ συγχρονισμού): δεν έχει καθόλου τις καρτέλες διαχειριστή
   const staffDevice = !!(sync && sync.device && sync.device.noPersonal);
-  const adminOnlyTabs = ["employees", "training", "reports"];
+  const adminOnlyTabs = ["employees", "training"];
   useEffect(() => { if (staffDevice && adminOnlyTabs.includes(tab)) setTab("daily"); }, [staffDevice, tab]);
   const tabs = [
     { id: "daily", label: "Καταγραφές", icon: ClipboardList },
     { id: "employees", label: "Προσωπικό", icon: Users },
     { id: "training", label: "Εκπαίδευση", icon: GraduationCap },
-    { id: "reports", label: "Αναφορές", icon: BarChart3 },
     { id: "haccp", label: "HACCP", icon: GitBranch },
     { id: "archive", label: "Αρχείο", icon: Archive },
     { id: "settings", label: "Ρυθμίσεις", icon: Cog },
@@ -5475,11 +5522,6 @@ function App() {
             <TrainingTab employees={employees} sessions={sessions} setSessions={setSessions} requestPrint={requestPrint} packageCompletions={packageCompletions} setPackageCompletions={setPackageCompletions} businessInfo={businessInfo} />
           </AdminGate>
         )}
-        {tab === "reports" && !staffDevice && (
-          <AdminGate code={adminCode} setCode={setAdminCode} recovery={adminRecovery} unlocked={adminUnlocked} setUnlocked={setAdminUnlocked}>
-            <CashReportsTab cashData={cashData} cashPlatforms={cashPlatforms} shiftNames={shiftNames} />
-          </AdminGate>
-        )}
         {tab === "daily" && (
           <DailyLogsTab
             ccpData={ccpData} setCcpData={setCcpData}
@@ -5511,6 +5553,8 @@ function App() {
         )}
         {tab === "archive" && (
           <ArchiveTab
+            cashData={cashData} cashPlatforms={cashPlatforms} shiftNames={shiftNames}
+            adminUnlocked={adminUnlocked} setAdminUnlocked={setAdminUnlocked} staffDevice={staffDevice}
             records={records} setRecords={setRecords}
             getBackupText={getBackupText} onImport={importBackup}
             ccpData={ccpData} setCcpData={setCcpData}
