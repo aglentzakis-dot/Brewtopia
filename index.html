@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-23.19"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-24.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -194,7 +194,11 @@ function thermoRequest(baseUrl, path) {
   return fetch(`${u}${path}`, { headers: { "CF-Access-Client-Id": key.id, "CF-Access-Client-Secret": key.secret }, cache: "no-store" });
 }
 
-const SHIFTS = ["Γ", "Α", "Β"]; // σειρά βαρδιών: Βραδινή → Πρωινή → Μεσημεριανή
+const SHIFTS = ["Γ", "Α", "Β"];
+const STATION_OFF_LABELS = { repair: "προς επισκευή", broken: "χαλασμένο", closed: "καταργημένο" };
+// Εντός ορίων HACCP (ψυγείο ≤ 7°C, κατάψυξη ≤ -16°C)
+const thermoInRange = (st, n) => (st.type === "freezer" ? n <= -16 : st.type === "fridge" ? n <= 7 : true);
+const clockHM = (ts) => { const d = new Date(ts); return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0"); }; // σειρά βαρδιών: Βραδινή → Πρωινή → Μεσημεριανή
 
 // Αυτόματη καταγραφή θερμοκρασιών σε προκαθορισμένες ώρες ανά βάρδια (τρέχει ΜΟΝΟ όσο η εφαρμογή είναι ανοιχτή).
 // - γράφει μόνο στην ΤΡΕΧΟΥΣΑ βάρδια της σημερινής ημέρας, ποτέ σε άλλη
@@ -230,7 +234,7 @@ function useThermoAuto({ thermoConfig, stations, ccpData, setCcpData }) {
       if (done[key]) return;
       if (lastTry[key] && Date.now() - lastTry[key] < 5 * 60000) return;
       const cur = data?.[mk]?.[date]?.[active] || {};
-      const missing = (sts || []).filter((st) => st.type !== "dry" && st.sensorId && (cur[st.id] === undefined || cur[st.id] === "" || cur[st.id] === "-"));
+      const missing = (sts || []).filter((st) => st.type !== "dry" && st.sensorId && !st.off && (cur[st.id] === undefined || cur[st.id] === "" || cur[st.id] === "-"));
       const mark = (n) => { try { const d = thermoAutoDoneRead(); d[key] = { at: Date.now(), n }; window.localStorage.setItem(THERMO_AUTO_DONE_KEY, JSON.stringify(d)); } catch (e) {} };
       if (missing.length === 0) { mark(0); return; }
       lastTry[key] = Date.now();
@@ -243,12 +247,34 @@ function useThermoAuto({ thermoConfig, stations, ccpData, setCcpData }) {
         const body = await res.json();
         const lookup = Array.isArray(body) ? Object.fromEntries(body.map((d) => [d.id ?? d.device ?? d.deviceId, d])) : body;
         const vals = {};
-        missing.forEach((st) => {
+        const times = {};
+        const outMs = Math.max(1, Number(cfg.outMinutes) || 45) * 60000;
+        for (const st of missing) {
           const r = lookup[st.sensorId];
           const tv = r?.temperature ?? r?.temp ?? r?.value;
           const fresh = typeof r?.ts !== "number" || Date.now() - r.ts <= THERMO_MAX_AGE_MS;
-          if (tv !== undefined && tv !== null && fresh) vals[st.id] = String(tv);
-        });
+          if (tv === undefined || tv === null || !fresh) continue;
+          const nv = Number(tv);
+          if (!Number.isFinite(nv)) continue;
+          if (!thermoInRange(st, nv)) {
+            // Εκτός ορίων: αγνοείται (στιγμιαίο — καθάρισμα/φόρτωμα), εκτός αν μένει εκτός ορίων συνεχόμενα πάνω από το όριο λεπτών
+            let sustained = false;
+            try {
+              const hr = await thermoRequest(u, `/api/history?device=${encodeURIComponent(st.sensorId)}&days=1`);
+              if (hr.ok) {
+                const rows = (await hr.json()).filter((x) => x && typeof x.temperature === "number" && typeof x.ts === "number").sort((a, b) => b.ts - a.ts);
+                if (rows.length && !thermoInRange(st, rows[0].temperature)) {
+                  let startTs = rows[0].ts;
+                  for (const x of rows) { if (thermoInRange(st, x.temperature)) break; startTs = x.ts; }
+                  sustained = rows[0].ts - startTs >= outMs;
+                }
+              }
+            } catch (e2) { /* χωρίς ιστορικό δεν καταγράφεται εκτός ορίων — ξαναδοκιμάζει */ }
+            if (!sustained) continue;
+          }
+          vals[st.id] = String(tv);
+          times[st.id] = clockHM(typeof r?.ts === "number" ? r.ts : Date.now());
+        }
         const n = Object.keys(vals).length;
         if (n === 0) return;
         const latest = ref.current.ccpData;
@@ -259,7 +285,9 @@ function useThermoAuto({ thermoConfig, stations, ccpData, setCcpData }) {
         const add = {};
         Object.keys(vals).forEach((k) => { if (cur2[k] === undefined || cur2[k] === "" || cur2[k] === "-") add[k] = vals[k]; });
         if (Object.keys(add).length === 0) return;
-        next[mk][date][active] = { ...cur2, ...add };
+        const addTimes = {};
+        Object.keys(add).forEach((k) => { addTimes[k] = times[k]; });
+        next[mk][date][active] = { ...cur2, ...add, _times: { ...(cur2._times || {}), ...addTimes } };
         ref.current.setCcpData(next);
         if (n === missing.length) mark(n);
       } catch (e) { /* χωρίς κλειδί ή χωρίς σύνδεση: ξαναδοκιμάζει σε 5 λεπτά */ } finally { busy = false; }
@@ -1605,7 +1633,7 @@ function MonthlyFullPrintSheet({ mk, stations, displayItems, cleaningAreas, ccpD
                   <td style={td}>{st.name}</td>
                   {SHIFTS.map((s) => {
                     const v = ccpData?.[mk]?.[date]?.[s]?.[st.id];
-                    return <td key={s} style={v ? td : { ...td, color: "#b91c1c", fontStyle: "italic" }}>{v || "Δεν καταχωρήθηκε"}</td>;
+                    return <td key={s} style={v ? td : st.off ? { ...td, color: "#64748b", fontStyle: "italic" } : { ...td, color: "#b91c1c", fontStyle: "italic" }}>{v || (st.off ? "Εκτός λειτουργίας" : "Δεν καταχωρήθηκε")}</td>;
                   })}
                 </tr>
               ))}
@@ -1859,14 +1887,16 @@ function NewCleanAreaForm({ onAdd }) {
    ΤΑΜΕΙΟ ΒΑΡΔΙΑΣ — μέτρημα χαρτονομισμάτων, κερμάτων και ποσών καρτών/πλατφορμών
    ============================================================ */
 const CASH_NOTES = [100, 50, 20, 10, 5];
-const CASH_COINS = [2, 1, 0.5, 0.2, 0.1];
-// Ζύγιση κερμάτων: βάρος κάθε κέρματος σε γραμμάρια — χωριστή ενότητα, προστίθεται στα κέρματα που μετρήθηκαν με το χέρι
-const CASH_WEIGH_COINS = [
-  { d: 2, g: 8.5 }, { d: 1, g: 7.5 }, { d: 0.5, g: 7.8 }, { d: 0.2, g: 5.74 }, { d: 0.1, g: 4.1 }, { d: 0.05, g: 3.92 },
-];
-const cashWeighKey = (d) => "g_d" + String(d).replace(".", "_");
-const cashWeighPieces = (day, c) => { const g = cashNum(day?.[cashWeighKey(c.d)]); return g > 0 ? Math.round(g / c.g) : 0; };
-const cashWeighCents = (day) => CASH_WEIGH_COINS.reduce((a, c) => a + cashCents(cashWeighPieces(day, c) * c.d), 0);
+const CASH_COINS = [2, 1, 0.5, 0.2, 0.1, 0.05];
+// Βάρος κάθε κέρματος σε γραμμάρια (εναλλακτική καταμέτρηση με ζύγιση, στην ίδια γραμμή)
+const CASH_COIN_GRAMS = { 2: 8.5, 1: 7.5, 0.5: 7.8, 0.2: 5.74, 0.1: 4.1, 0.05: 3.92 };
+const cashGramKey = (d) => "g_d" + String(d).replace(".", "_");
+// Τεμάχια: αν γράφτηκαν γραμμάρια, υπολογίζονται από αυτά· αλλιώς όσα τεμάχια γράφτηκαν
+const cashQty = (day, d) => {
+  const w = CASH_COIN_GRAMS[d];
+  const g = w ? cashNum(day?.[cashGramKey(d)]) : 0;
+  return g > 0 ? Math.round(g / w) : cashNum(day?.["d" + String(d).replace(".", "_")]);
+};
 const CASH_OTHER = [
   ["pos1", "Κάρτες POS 1"], ["pos2", "Κάρτες POS 2"], ["efood", "efood"],
   ["wolt", "Wolt"], ["box", "Box"], ["delivery", "Delivery"],
@@ -2049,16 +2079,29 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms, cardPrev })
   );
   const row = (d) => {
     const key = "d" + String(d).replace(".", "_");
-    const lineCents = cashCents(cashNum(day[key]) * d);
+    const lineCents = cashCents(cashQty(day, d) * d);
+    const w = CASH_COIN_GRAMS[d];
+    const gKey = cashGramKey(d);
+    const byWeight = !!w && cashNum(day[gKey]) > 0;
     return (
       <div key={key} className="flex items-center justify-between gap-2 py-2 border-b border-slate-300">
-        <span className="text-sm font-semibold text-slate-700 w-20">{cashDenomLabel(d)}</span>
+        <span className="text-sm font-semibold text-slate-700 w-16">{cashDenomLabel(d)}</span>
+        {w ? (
+          <input
+            type="text" inputMode="decimal" placeholder="γρ." aria-label={`Γραμμάρια κερμάτων ${cashDenomLabel(d)}`}
+            className="w-16 border border-amber-300 bg-white rounded-lg px-1.5 py-1 text-xs text-right focus:outline-none focus:ring-2 focus:ring-amber-500"
+            value={cv(gKey)}
+            onChange={(e) => setField(gKey, e.target.value.replace(/[^0-9,.]/g, ""))}
+          />
+        ) : <span className="w-16" />}
         <span className="text-[11px] text-slate-400 flex-1 text-right">{lineCents > 0 ? cashFmt(lineCents) : ""}</span>
-        {qtyInput(key)}
+        {byWeight ? (
+          <div className="w-20 border border-slate-200 bg-slate-50 rounded-lg px-2 py-1.5 text-base text-right text-slate-500" title="Από τα γραμμάρια — σβήσε τα γραμμάρια για να γράψεις τεμάχια">{cashQty(day, d)}</div>
+        ) : qtyInput(key)}
       </div>
     );
   };
-  const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashNum(day["d" + String(d).replace(".", "_")]) * d), 0) + cashWeighCents(day);
+  const cashTotal = [...CASH_NOTES, ...CASH_COINS].reduce((a, d) => a + cashCents(cashQty(day, d) * d), 0);
   const CARD_KEYS = ["pos1", "pos2"];
   const cardNet = {};
   CARD_KEYS.forEach((k) => { cardNet[k] = cashHasVal(day[k]) ? cashNetCard(cashCents(cashNum(day[k])), cardPrev && cardPrev[k]) : { net: 0, sub: 0, reset: false }; });
@@ -2102,37 +2145,8 @@ function CashTab({ day, setField, clearAll, platforms, setPlatforms, cardPrev })
         {CASH_NOTES.map(row)}
       </div>
       <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-wide text-amber-800 mb-1">🪙 Κέρματα (γράψε πόσα τεμάχια)</p>
+        <p className="text-xs font-bold uppercase tracking-wide text-amber-800 mb-1">🪙 Κέρματα (τεμάχια δεξιά — ή γραμμάρια αριστερά)</p>
         {CASH_COINS.map(row)}
-      </div>
-      <div className="rounded-xl bg-orange-50 border border-orange-200 p-3 mt-3 shadow-sm">
-        <p className="text-xs font-bold uppercase tracking-wide text-orange-800 mb-1">⚖️ Κέρματα με ζύγιση (γράψε γραμμάρια)</p>
-        <p className="text-[10px] text-slate-500 mb-1">Για πολλά κέρματα του ίδιου είδους: ζύγισέ τα και γράψε το βάρος. Τα τεμάχια υπολογίζονται μόνα τους και προστίθενται στο σύνολο μετρητών (επιπλέον από τα κέρματα που μέτρησες παραπάνω).</p>
-        {CASH_WEIGH_COINS.map((c) => {
-          const gKey = cashWeighKey(c.d);
-          const grams = cashNum(day[gKey]);
-          const pcs = cashWeighPieces(day, c);
-          const off = grams > 0 && Math.abs(grams / c.g - Math.round(grams / c.g)) > 0.3;
-          return (
-            <div key={gKey} className="py-1.5 border-b border-orange-200">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-semibold text-slate-700 w-20">{cashDenomLabel(c.d)}</span>
-                <span className="text-[10px] text-slate-400">1 τεμ. = {String(c.g).replace(".", ",")} γρ.</span>
-                <span className="text-[11px] text-slate-500 flex-1 text-right">{pcs > 0 ? `${pcs} τεμ. = ${cashFmt(cashCents(pcs * c.d))}` : ""}</span>
-                <input
-                  type="text" inputMode="decimal" placeholder="γρ." aria-label={`Γραμμάρια κερμάτων ${cashDenomLabel(c.d)}`}
-                  className="w-20 border border-orange-300 bg-white rounded-lg px-2 py-1.5 text-base text-right focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  value={cv(gKey)}
-                  onChange={(e) => setField(gKey, e.target.value.replace(/[^0-9,.]/g, ""))}
-                />
-              </div>
-              {off && <p className="text-[10px] text-amber-700 font-semibold text-right mt-0.5">⚠ το βάρος δεν βγάζει ακέραιο αριθμό κερμάτων — έλεγξε</p>}
-            </div>
-          );
-        })}
-        {cashWeighCents(day) > 0 && (
-          <p className="text-[11px] text-right mt-1 font-bold text-orange-800">Σύνολο ζύγισης: {cashFmt(cashWeighCents(day))}</p>
-        )}
       </div>
       <div className="flex items-center justify-between mt-3 mb-5 px-3 py-2.5 rounded-xl bg-gradient-to-b from-emerald-600 to-emerald-800 text-white shadow-[0_3px_0_rgba(6,78,59,0.55)]">
         <span className="text-sm font-bold">Σύνολο μετρητών</span>
@@ -2265,12 +2279,12 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   const todayKey = todayISO();
   const todayMonthKey = monthKey(clockNow);
   const activeShiftFilled = stations
-    .filter((s) => s.type !== "dry")
+    .filter((s) => s.type !== "dry" && !s.off)
     .every((st) => {
       const v = ccpData?.[todayMonthKey]?.[todayKey]?.[activeShift]?.[st.id];
       return v !== undefined && v !== "" && v !== "-";
     });
-  const showReminder = stations.filter((s) => s.type !== "dry").length > 0 && !activeShiftFilled && minsLeft <= 45;
+  const showReminder = stations.filter((s) => s.type !== "dry" && !s.off).length > 0 && !activeShiftFilled && minsLeft <= 45;
 
   const [wrongShiftWarning, setWrongShiftWarning] = useState(null);
   const selectShift = (s) => {
@@ -2490,7 +2504,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
   // Χαμηλότερη/υψηλότερη θερμοκρασία της ΕΠΙΛΕΓΜΕΝΗΣ ημερομηνίας (τοπική ημέρα) ανά σταθμό, από το ιστορικό του ThermoServer.
   // Αν δεν υπάρχουν μετρήσεις εκείνης της ημέρας, δεν εμφανίζεται τίποτα.
   const [thermoStats, setThermoStats] = useState({}); // { "σταθμός|ημερομηνία": { min, max, n } | null }
-  const statSensorsKey = (stations || []).map((st) => (st.type !== "dry" && st.sensorId ? st.id + ":" + st.sensorId : "")).join("|");
+  const statSensorsKey = (stations || []).map((st) => (st.type !== "dry" && st.sensorId && !st.off ? st.id + ":" + st.sensorId : "")).join("|");
   useEffect(() => {
     if (sub !== "temps" || !thermoConfig?.enabled || !thermoConfig?.baseUrl) return;
     const parts = String(date).split("-").map(Number);
@@ -2503,7 +2517,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       const out = {};
       for (const st of stations || []) {
         if (cancelled) return;
-        if (st.type === "dry" || !st.sensorId) continue;
+        if (st.type === "dry" || !st.sensorId || st.off) continue;
         try {
           const res = await thermoRequest(thermoUrl(), `/api/history?device=${encodeURIComponent(st.sensorId)}&days=${daysBack}`);
           if (!res.ok) continue;
@@ -2571,16 +2585,19 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
       next[mk][date] = next[mk][date] || {};
       next[mk][date][shift] = { ...next[mk][date][shift] };
       const measTs = {};
+      const mTimes = {};
       stations.forEach((st) => {
-        if (!st.sensorId) return;
+        if (!st.sensorId || st.off) return;
         const reading = lookup[st.sensorId];
         const t = reading?.temperature ?? reading?.temp ?? reading?.value;
         if (t !== undefined && t !== null) {
           next[mk][date][shift][st.id] = String(t);
           matched++;
           if (typeof reading?.ts === "number") measTs[st.id] = reading.ts;
+          mTimes[st.id] = clockHM(typeof reading?.ts === "number" ? reading.ts : Date.now());
         }
       });
+      if (Object.keys(mTimes).length) next[mk][date][shift]._times = { ...(next[mk][date][shift]._times || {}), ...mTimes };
       setThermoMeasTs(measTs);
       setThermoNow(Date.now());
       if (matched > 0) setThermoRec({ n: matched, at: Date.now(), stale: Object.values(measTs).filter((ts) => Date.now() - ts > 30 * 60000).length });
@@ -2875,12 +2892,26 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                 const val = dayTemps[st.id] ?? "";
                 const ok = evalStation(st, val);
                 const outOfRange = val !== "" && val !== "-" && ok === false;
+                if (st.off) {
+                  return (
+                    <div key={st.id} className="border-b border-slate-100 pb-1 opacity-50">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm text-slate-500 flex items-center gap-1.5">
+                          {st.type !== "dry" && <Snowflake size={13} className="text-slate-400" />}
+                          {st.name}
+                        </span>
+                        <span className="text-[11px] text-slate-500 italic">εκτός λειτουργίας · {STATION_OFF_LABELS[st.off] || "απενεργοποιημένο"}</span>
+                      </div>
+                    </div>
+                  );
+                }
                 return (
                   <div key={st.id} className="border-b border-slate-100 pb-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm text-slate-700 flex items-center gap-1.5">
                         {st.type !== "dry" && <Snowflake size={13} className={st.type === "freezer" ? "text-sky-500" : "text-teal-500"} />}
                         {st.name}
+                        {dayTemps._times?.[st.id] && <span className="text-[10px] text-slate-400">· ώρα {dayTemps._times[st.id]}</span>}
                         {thermoMeasTs[st.id] && (() => {
                           const mins = Math.max(0, Math.round((thermoNow - thermoMeasTs[st.id]) / 60000));
                           const cls = mins >= 75 ? "text-red-600 font-semibold" : mins >= 30 ? "text-amber-600 font-semibold" : "text-slate-400";
@@ -2966,6 +2997,21 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                       >{label}</button>
                     ))}
                   </div>
+                  {st.type !== "dry" && (
+                    <div className="pl-9 flex items-center gap-1.5">
+                      <span className="text-[10px] text-slate-500">Κατάσταση:</span>
+                      <select
+                        className="border border-slate-200 rounded-lg px-2 py-1 text-[11px] bg-white"
+                        value={st.off || ""}
+                        onChange={(e) => renameStationField(idx, "off", e.target.value || undefined)}
+                      >
+                        <option value="">Σε λειτουργία</option>
+                        <option value="repair">Προς επισκευή (σταματά η καταγραφή)</option>
+                        <option value="broken">Χαλασμένο (σταματά η καταγραφή)</option>
+                        <option value="closed">Καταργημένο (σταματά η καταγραφή)</option>
+                      </select>
+                    </div>
+                  )}
                   {st.type !== "dry" && (
                     <div className="pl-9">
                       {thermoDevices.length > 0 ? (
@@ -3958,6 +4004,15 @@ function ThermoServerPanel({ config, setConfig }) {
             <p className="text-[11px] text-slate-500 mb-2">
               Γίνεται μόνο όσο η εφαρμογή είναι ανοιχτή σε κάποια συσκευή. Γράφει μόνο στην τρέχουσα βάρδια, και μόνο σε κελιά που είναι άδεια. Αφήνεις κενή την ώρα για βάρδια που δεν θες.
             </p>
+            <p className="text-[11px] text-slate-500 mb-2">
+              Η αυτόματη καταγραφή γράφει <b>μόνο τιμές εντός ορίων</b> και σημειώνει την ώρα της μέτρησης. Μια στιγμιαία υπέρβαση (π.χ. καθαρισμός ή φόρτωμα) αγνοείται. Αν το ψυγείο μένει εκτός ορίων συνεχόμενα, γράφεται η πραγματική τιμή ώστε να ζητηθεί διορθωτική ενέργεια.
+            </p>
+            <label className="text-[11px] text-slate-600 flex items-center gap-1.5 mb-2">
+              Εκτός ορίων συνεχόμενα για πάνω από
+              <input type="number" min="5" max="240" className="w-16 border border-slate-300 rounded px-1.5 py-1 text-xs" value={draft.outMinutes ?? 45}
+                onChange={(e) => setDraft({ ...draft, outMinutes: e.target.value })} />
+              λεπτά
+            </label>
             <div className="flex flex-wrap gap-3">
               {SHIFTS.map((sh) => (
                 <label key={sh} className="text-[11px] text-slate-600 flex items-center gap-1.5">
@@ -4343,7 +4398,7 @@ const cashIsDenomKey = (k) => /^d\d+(_\d+)?$/.test(k);
 const cashFmtPlain = (cents) => (cents / 100).toFixed(2).replace(".", ",");
 
 function cashSummarizeShift(sh, platIds) {
-  const cash = CASH_NOTES.concat(CASH_COINS).reduce((a, d) => a + cashCents(cashNum(sh["d" + String(d).replace(".", "_")]) * d), 0) + cashWeighCents(sh);
+  const cash = CASH_NOTES.concat(CASH_COINS).reduce((a, d) => a + cashCents(cashQty(sh, d) * d), 0);
   const vals = { cash, pos1: cashCents(cashNum(sh.pos1)), pos2: cashCents(cashNum(sh.pos2)), invoices: cashCents(cashNum(sh.invoices)) };
   platIds.forEach((id) => { vals[id] = cashCents(cashNum(sh[id])); });
   return vals;
