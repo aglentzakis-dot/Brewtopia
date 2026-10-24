@@ -128,7 +128,7 @@ const FileSignature = makeIcon(<>
    ΣΤΑΘΕΡΕΣ / ΔΕΔΟΜΕΝΑ ΕΠΙΧΕΙΡΗΣΗΣ
    ============================================================ */
 
-const APP_VERSION = "2026-10-24.1"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
+const APP_VERSION = "2026-10-24.2"; // αλλάζει σε κάθε νέα έκδοση αρχείου — βοηθάει να ξέρεις αν φόρτωσε η αναβάθμιση
 
 /* ============================================================
    ΑΠΟΘΗΚΕΥΣΗ "ΧΕΙΡΙΣΤΗ ΦΑΚΕΛΟΥ" (File System Access API) ΣΕ IndexedDB
@@ -825,9 +825,9 @@ const CorrectiveActionPanel = ({ value, onChange, actions = CORRECTIVE_ACTIONS }
   );
 };
 
-const Stamp = ({ ok, textOk = "ΕΝΤΟΣ ΟΡΙΩΝ", textBad = "ΕΚΤΟΣ ΟΡΙΩΝ" }) => (
+const Stamp = ({ ok, textOk = "ΕΝΤΟΣ ΟΡΙΩΝ", textBad = "ΕΚΤΟΣ ΟΡΙΩΝ", small = false }) => (
   <span
-    className={`inline-block px-2 py-0.5 text-[10px] font-bold tracking-widest uppercase border-2 rounded
+    className={`inline-block ${small ? "px-1.5 py-0.5 text-[9px] tracking-wide leading-tight text-center" : "px-2 py-0.5 text-[10px] tracking-widest"} font-bold uppercase border-2 rounded
       ${ok ? "border-teal-700 text-teal-700" : "border-red-600 text-red-600"}`}
     style={{ transform: "rotate(-2deg)" }}
   >
@@ -937,7 +937,7 @@ function SmartDateInput({ value, onChange }) {
 
 
 // Πεδίο θερμοκρασίας που δέχεται αρνητικές τιμές κανονικά σε κινητό (χωρίς το πρόβλημα του type=number keypad)
-const TempInput = ({ value, onChange, className = "" }) => {
+const TempInput = ({ value, onChange, className = "", compact = false }) => {
   const handleChange = (e) => {
     let v = e.target.value.replace(",", ".");
     // επιτρέπει μόνο: προαιρετικό μείον στην αρχή, ψηφία, μία τελεία
@@ -955,14 +955,14 @@ const TempInput = ({ value, onChange, className = "" }) => {
       <button
         type="button"
         onClick={toggleSign}
-        className="w-7 h-7 shrink-0 rounded-lg border border-slate-300 text-slate-500 font-bold text-sm flex items-center justify-center"
+        className={`${compact ? "w-6 h-7" : "w-7 h-7"} shrink-0 rounded-lg border border-slate-300 text-slate-500 font-bold text-sm flex items-center justify-center`}
         aria-label="Εναλλαγή προσήμου"
       >±</button>
       <input
         type="text"
         inputMode="decimal"
         placeholder="°C"
-        className="w-20 border border-slate-300 rounded-lg px-2 py-1 text-sm text-right"
+        className={`${compact ? "w-16" : "w-20"} border border-slate-300 rounded-lg px-2 py-1 text-sm text-right`}
         value={value ?? ""}
         onChange={handleChange}
       />
@@ -2907,38 +2907,40 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                 }
                 return (
                   <div key={st.id} className="border-b border-slate-100 pb-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm text-slate-700 flex items-center gap-1.5">
-                        {st.type !== "dry" && <Snowflake size={13} className={st.type === "freezer" ? "text-sky-500" : "text-teal-500"} />}
-                        {st.name}
-                        {dayTemps._times?.[st.id] && <span className="text-[10px] text-slate-400">· ώρα {dayTemps._times[st.id]}</span>}
-                        {thermoMeasTs[st.id] && (() => {
-                          const mins = Math.max(0, Math.round((thermoNow - thermoMeasTs[st.id]) / 60000));
-                          const cls = mins >= 75 ? "text-red-600 font-semibold" : mins >= 30 ? "text-amber-600 font-semibold" : "text-slate-400";
-                          const txt = mins < 1 ? "μόλις τώρα" : mins < 60 ? `πριν από ${mins} λεπτά` : `πριν από ${Math.floor(mins / 60)} ώρ. ${mins % 60} λεπτά`;
-                          return <span className={`text-[10px] ${cls}`}>· μέτρηση {txt}{mins >= 30 ? " ⚠" : ""}</span>;
-                        })()}
-                      </span>
-                      <div className="flex items-center gap-2">
-                        {st.type !== "dry" && (
-                          <>
-                            <TempInput value={val} onChange={(v) => setTemp(st.id, v)} />
-                            {val !== "" && val !== "-" && <Stamp ok={ok} />}
-                          </>
-                        )}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm text-slate-700 flex items-center gap-1.5 leading-tight">
+                          {st.type !== "dry" && <Snowflake size={13} className={`shrink-0 ${st.type === "freezer" ? "text-sky-500" : "text-teal-500"}`} />}
+                          <span className="min-w-0 break-words">{st.name}</span>
+                        </div>
+                        <div className="text-[10px] leading-snug text-slate-400 flex flex-wrap gap-x-2 mt-0.5">
+                          {dayTemps._times?.[st.id] && <span>🕒 {dayTemps._times[st.id]}</span>}
+                          {thermoMeasTs[st.id] && (() => {
+                            const mins = Math.max(0, Math.round((thermoNow - thermoMeasTs[st.id]) / 60000));
+                            const cls = mins >= 75 ? "text-red-600 font-semibold" : mins >= 30 ? "text-amber-600 font-semibold" : "";
+                            const txt = mins < 1 ? "μόλις τώρα" : mins < 60 ? `πριν ${mins}΄` : `πριν ${Math.floor(mins / 60)}ω ${mins % 60}΄`;
+                            return <span className={cls}>μέτρηση {txt}{mins >= 30 ? " ⚠" : ""}</span>;
+                          })()}
+                          {thermoStats[st.id + "|" + date] && (() => {
+                            const ts2 = thermoStats[st.id + "|" + date];
+                            if (!ts2 || !Number.isFinite(ts2.min) || !Number.isFinite(ts2.max)) return null;
+                            const f = (n) => n.toFixed(1).replace(".", ",");
+                            const maxBad = evalStation(st, String(ts2.max)) === false;
+                            return (
+                              <span title="Από το ιστορικό του ThermoServer, για την επιλεγμένη ημερομηνία">
+                                ελάχ. <b className="text-slate-600">{f(ts2.min)}°</b> · μέγ. <b className={maxBad ? "text-red-600" : "text-slate-600"}>{f(ts2.max)}°{maxBad ? " ⚠" : ""}</b>
+                              </span>
+                            );
+                          })()}
+                        </div>
                       </div>
+                      {st.type !== "dry" && (
+                        <div className="shrink-0 flex flex-col items-end gap-1">
+                          <TempInput compact value={val} onChange={(v) => setTemp(st.id, v)} />
+                          {val !== "" && val !== "-" && <Stamp small ok={ok} />}
+                        </div>
+                      )}
                     </div>
-                    {thermoStats[st.id + "|" + date] && (() => {
-                      const ts2 = thermoStats[st.id + "|" + date];
-                      if (!ts2 || !Number.isFinite(ts2.min) || !Number.isFinite(ts2.max)) return null;
-                      const f = (n) => n.toFixed(1).replace(".", ",");
-                      const maxBad = evalStation(st, String(ts2.max)) === false;
-                      return (
-                        <p className="text-[10px] leading-tight text-slate-400" title="Από το ιστορικό του ThermoServer, για την επιλεγμένη ημερομηνία">
-                          ημέρα: ελάχ. <b className="text-slate-600">{f(ts2.min)}°</b> · μέγ. <b className={maxBad ? "text-red-600" : "text-slate-600"}>{f(ts2.max)}°{maxBad ? " ⚠" : ""}</b>
-                        </p>
-                      );
-                    })()}
                     {outOfRange && (
                       <CorrectiveActionPanel value={dayActions[st.id]} onChange={(v) => setStationAction(st.id, v)} />
                     )}
@@ -2956,6 +2958,10 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
 
           {editingStations && (
             <div className="space-y-2">
+              <div className="sticky top-[120px] z-10 bg-red-50 border-2 border-red-300 rounded-xl p-2 flex items-center gap-2 shadow-sm">
+                <span className="text-[11px] font-bold text-red-700 flex-1">✎ Επεξεργασία λίστας σταθμών</span>
+                <button onClick={() => setEditingStations(false)} className="text-[11px] px-3 py-1.5 rounded-lg bg-red-600 text-white font-bold">Τέλος επεξεργασίας</button>
+              </div>
               <p className="text-xs text-slate-500 mb-1">Με τα βελάκια αλλάζεις τη σειρά. Πάτα στο όνομα για να το αλλάξεις.</p>
               {thermoConfig.enabled && thermoConfig.baseUrl && (
                 <button
@@ -2998,17 +3004,17 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
                     ))}
                   </div>
                   {st.type !== "dry" && (
-                    <div className="pl-9 flex items-center gap-1.5">
-                      <span className="text-[10px] text-slate-500">Κατάσταση:</span>
+                    <div className="pl-9 flex items-center gap-1.5 min-w-0">
+                      <span className="text-[10px] text-slate-500 shrink-0">Κατάσταση:</span>
                       <select
-                        className="border border-slate-200 rounded-lg px-2 py-1 text-[11px] bg-white"
+                        className="min-w-0 flex-1 max-w-full border border-slate-200 rounded-lg px-2 py-1 text-[11px] bg-white"
                         value={st.off || ""}
                         onChange={(e) => renameStationField(idx, "off", e.target.value || undefined)}
                       >
                         <option value="">Σε λειτουργία</option>
-                        <option value="repair">Προς επισκευή (σταματά η καταγραφή)</option>
-                        <option value="broken">Χαλασμένο (σταματά η καταγραφή)</option>
-                        <option value="closed">Καταργημένο (σταματά η καταγραφή)</option>
+                        <option value="repair">Προς επισκευή</option>
+                        <option value="broken">Χαλασμένο</option>
+                        <option value="closed">Καταργημένο</option>
                       </select>
                     </div>
                   )}
@@ -3043,7 +3049,7 @@ function DailyLogsTab({ ccpData, setCcpData, cleanData, setCleanData, oilData, s
               <button onClick={addStation} className="w-full flex items-center justify-center gap-1.5 border-2 border-dashed border-slate-300 text-slate-500 rounded-lg py-2 text-sm font-semibold">
                 <Plus size={15} /> Προσθήκη σταθμού
               </button>
-              <button onClick={() => setEditingStations(false)} className="w-full bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold">
+              <button onClick={() => setEditingStations(false)} className="w-full bg-red-600 text-white rounded-lg py-2 text-sm font-bold">
                 Τέλος επεξεργασίας
               </button>
             </div>
